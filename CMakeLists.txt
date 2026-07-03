@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(fleet-commander VERSION 0.1.0 LANGUAGES C CXX)
+project(fleet_commander VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -12,6 +12,8 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(tf2_msgs REQUIRED)
 
 include (FetchContent)
 
@@ -73,6 +75,8 @@ add_executable(fleet_commander
   src/main.cpp
 )
 
+ament_target_dependencies(fleet_commander rclcpp nav_msgs tf2_msgs) 
+
 target_include_directories(fleet_commander PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
@@ -83,9 +87,6 @@ target_link_libraries(fleet_commander
   glad_gl_core_46
 )
 
-target_link_libraries(fleet_commander
-  rclcpp::rclcpp
-)
 
 install(TARGETS fleet_commander
   DESTINATION lib/${PROJECT_NAME})
