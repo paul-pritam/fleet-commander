@@ -14,6 +14,19 @@ struct MapData{
     double resolution = 0.0;
     Eigen::Vector2d origin = Eigen::Vector2d::Zero();
 
+    Eigen::Vector2i world_to_pixel(double wx, double wy) const{
+        if(resolution <= 0.0 || width == 0 || height == 0 ) return {-1,-1};
+        int px = static_cast<int>((wx - origin.x())/resolution);
+        int py = static_cast<int>((wy - origin.y())/resolution);
+        return {px, py};
+    }
+
+    Eigen::Vector2d pixel_to_world(int px, int py) const{
+        double wx = px * resolution + origin.x();
+        double wy = py * resolution + origin.y();
+        return {wx, wy};
+    }
+
     bool empty() const { return pixels.empty(); }
 };
 

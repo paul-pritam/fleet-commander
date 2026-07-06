@@ -14,6 +14,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(tf2_msgs REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 include (FetchContent)
 
@@ -73,6 +74,8 @@ target_compile_definitions(imgui_lib PUBLIC IMGUI_IMPL_OPENGL_LOADER_GLAD2)
 
 add_executable(fleet_commander
   src/main.cpp
+  src/ros_bridge.cpp
+  src/app.cpp
 )
 
 ament_target_dependencies(fleet_commander rclcpp nav_msgs tf2_msgs) 
@@ -85,6 +88,7 @@ target_link_libraries(fleet_commander
   imgui_lib
   glfw
   glad_gl_core_46
+  Eigen3::Eigen
 )
 
 
