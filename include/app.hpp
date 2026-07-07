@@ -12,7 +12,7 @@ class App{
         App();
         ~App();
 
-        bool init (int height, int width, const char *title);
+        bool init (int width, int height, const char *title);
         void run();
         void shutdown();
     private:

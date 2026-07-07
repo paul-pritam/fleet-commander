@@ -5,6 +5,9 @@
 #include <map>
 #include <chrono>
 #include <cstdint>
+#include <algorithm>
+
+#include <uuid/uuid.h>
 #include <eigen3/Eigen/Dense>
 
 struct MapData{
@@ -48,6 +51,10 @@ struct RobotState
     std::string current_goal_id;
     std::chrono::steady_clock::time_point last_tf_update;
 
+    float distance_to(const Eigen::Vector2d &point) const{
+        return static_cast<float>((Eigen::Vector2d(pose.x, pose.y) - point).norm());
+    }
+
     bool is_reachable() const{
         return std::chrono::steady_clock::now() - last_tf_update < std::chrono::seconds(5);   
     }
@@ -60,6 +67,14 @@ enum class GoalStatus{
     Failed,
     Cancelled
 };
+
+inline std::string generate_goal_id(){
+    uuid_t uuid;
+    uuid_generate(uuid);
+    char buf[37];
+    uuid_unparse_lower(uuid, buf);
+    return std::string(buf, 8);
+}
 
 struct GoalState {
     std::string id;
@@ -75,11 +90,38 @@ struct GoalState {
                status == GoalStatus::Cancelled;
     }
 
-    double age_ses() const{
+    double age_secs() const{
         return std::chrono::duration<double>(
             std::chrono::steady_clock::now() - created_at
         ).count();
     }
+
+    static const char *status_icon(GoalStatus s){
+        switch (s)
+        {
+        case GoalStatus::Active: return "[>]";
+        case GoalStatus::Pending: return "[ ]";
+        case GoalStatus::Succeeded: return "[OK]";
+        case GoalStatus::Failed: return "[!!]";
+        case GoalStatus::Cancelled: return "[--]";
+
+        }
+        return "?";
+    }
+
+    static const char *status_name(GoalStatus s){
+        switch (s)
+        {
+        case GoalStatus::Active: return "Active";
+        case GoalStatus::Pending: return "Pending";
+        case GoalStatus::Succeeded: return "Succeeded";
+        case GoalStatus::Failed: return "Failed";
+        case GoalStatus::Cancelled: return "Cancelled";
+
+        }
+        return "?";
+    }
+
 };
 
 struct FleetState{
@@ -88,5 +130,11 @@ struct FleetState{
     MapData map;
     void add_goal(GoalState goal){
         goals.push_back(std::move(goal)); // goal is moved instead of copy , saves some memory
+    }
+
+    void cleanup_old_goals(int max_age_secs = 300){
+        goals.erase(
+            std::remove_if(goals.begin(), goals.end(), [max_age_secs](const GoalState &g){ return g.is_terminal() && (g.age_secs() > max_age_secs); }), goals.end()
+        );
     }
 };

@@ -15,6 +15,10 @@ find_package(rclcpp REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(tf2_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(rclcpp_action REQUIRED)
+find_package(nav2_msgs REQUIRED)
+find_package(action_msgs REQUIRED)
+find_library(UUID_LIBRARY uuid REQUIRED)
 
 include (FetchContent)
 
@@ -24,7 +28,7 @@ set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
-  glfw 
+  glfw
   GIT_REPOSITORY https://github.com/glfw/glfw.git
   GIT_TAG        3.4
   GIT_SHALLOW    TRUE
@@ -70,7 +74,7 @@ target_include_directories(imgui_lib PUBLIC
 target_link_libraries(imgui_lib PUBLIC glfw glad_gl_core_46)
 target_compile_definitions(imgui_lib PUBLIC IMGUI_IMPL_OPENGL_LOADER_GLAD2)
 
-#project sources 
+#project sources
 
 add_executable(fleet_commander
   src/main.cpp
@@ -78,7 +82,7 @@ add_executable(fleet_commander
   src/app.cpp
 )
 
-ament_target_dependencies(fleet_commander rclcpp nav_msgs tf2_msgs) 
+ament_target_dependencies(fleet_commander rclcpp nav_msgs tf2_msgs rclcpp_action nav2_msgs action_msgs)
 
 target_include_directories(fleet_commander PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -89,6 +93,7 @@ target_link_libraries(fleet_commander
   glfw
   glad_gl_core_46
   Eigen3::Eigen
+  ${UUID_LIBRARY}
 )
 
 
