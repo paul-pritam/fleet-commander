@@ -80,9 +80,16 @@ add_executable(fleet_commander
   src/main.cpp
   src/ros_bridge.cpp
   src/app.cpp
+  src/scheduler.cpp
 )
 
-ament_target_dependencies(fleet_commander rclcpp nav_msgs tf2_msgs rclcpp_action nav2_msgs action_msgs)
+ament_target_dependencies(fleet_commander
+rclcpp
+nav_msgs
+tf2_msgs
+rclcpp_action
+nav2_msgs
+action_msgs)
 
 target_include_directories(fleet_commander PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include

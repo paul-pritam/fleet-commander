@@ -1,4 +1,5 @@
 #include "app.hpp"
+#include "scheduler.hpp"
 #include "state.hpp"
 // clang-format off
 #include <algorithm>
@@ -9,6 +10,10 @@
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
 
 App::App() = default;
 App::~App() { shutdown(); }
@@ -31,6 +36,7 @@ bool App::init(int height, int width, const char *title) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
   window_ = glfwCreateWindow(width, height, title, nullptr, nullptr);
   if (!window_) {
@@ -47,18 +53,44 @@ bool App::init(int height, int width, const char *title) {
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
-  ImGui::StyleColorsDark();
 
   ImGuiIO &io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-  ImGui::GetStyle().WindowRounding = 6.0f;
-  ImGui::GetStyle().FrameRounding = 4.0f;
-  ImGui::GetStyle().ScrollbarSize = 14.0f;
+
+  ImGui::StyleColorsDark();
+
+  ImGuiStyle &style = ImGui::GetStyle();
+  style.WindowRounding = 4.0f;
+  style.FrameRounding = 2.0f;
+  style.GrabRounding = 2.0f;
+  style.WindowPadding = ImVec2(8.0f, 8.0f);
+  style.FramePadding = ImVec2(8.0f, 4.0f);
+  style.ItemSpacing = ImVec2(8.0f, 4.0f);
+  style.ScrollbarSize = 14.0f;
 
   ImGui_ImplGlfw_InitForOpenGL(window_, true);
   ImGui_ImplOpenGL3_Init("#version 460");
 
   ros_ = std::make_shared<RosBridge>();
+
+  ros_->on_goal_result = [this](const std::string &goal_id,
+                                const std::string &robot_id, bool success) {
+    std::lock_guard<std::mutex> lock(ros_->state_mutex);
+    for (auto &g : ros_->state.goals) {
+      if (g.id == goal_id && g.status == GoalStatus::Active) {
+        g.status = success ? GoalStatus::Succeeded : GoalStatus::Failed;
+        g.completed_at = std::chrono::steady_clock::now();
+        break;
+      }
+    }
+    for (auto &[_, r] : ros_->state.robots) {
+      if (r.id == robot_id) {
+        r.status = RobotStatus::Idle;
+        r.current_goal_id.clear();
+        break;
+      }
+    }
+  };
 
   unsigned char placeholder[4] = {128, 128, 128, 255};
   glGenTextures(1, &map_texture_);
@@ -78,6 +110,7 @@ void App::run() {
     glfwPollEvents();
     rclcpp::spin_some(ros_);
     process_ros_events();
+    try_assign_goals();
 
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
@@ -105,6 +138,67 @@ void App::process_ros_events() {
   }
 }
 
+void App::try_assign_goals() {
+  std::lock_guard<std::mutex> lock(ros_->state_mutex);
+
+  auto &s = ros_->state;
+
+  auto pending = s.pending_goals();
+  auto idle = s.idle_robots();
+
+  if (pending.empty() || idle.empty())
+    return;
+
+  std::vector<AssignmentInput> robots;
+  for (auto *r : idle) {
+    robots.push_back({r->id, r->pose.x, r->pose.y, r->pose.yaw});
+  }
+
+  std::vector<GoalInput> goals;
+  for (auto *g : pending) {
+    goals.push_back({g->id, g->target.x(), g->target.y()});
+  }
+
+  std::unique_ptr<CostFunction> cost_fn;
+  if (selected_cost_fn_ == 0) {
+    cost_fn = std::make_unique<EuclideanCost>();
+  } else {
+    cost_fn = std::make_unique<HeadingAwareCost>();
+  }
+
+  Scheduler sched(std::move(cost_fn), max_goals_per_robot_);
+  auto assignments = sched.assign_goals(robots, goals);
+
+  for (const auto &a : assignments) {
+    for (auto *g : pending) {
+      if (g->id == a.goal) {
+        g->status = GoalStatus::Active;
+        g->assigned_robot = a.robot;
+        break;
+      }
+    }
+
+    for (auto &[_, r] : s.robots) {
+      if (r.id == a.robot) {
+        r.status = RobotStatus::Navigating;
+        r.current_goal_id = a.goal;
+        break;
+      }
+    }
+  }
+
+  for (const auto &a : assignments) {
+    for (const auto &g : s.goals) {
+      if (g.id == a.goal) {
+        lock.~lock_guard();
+        ros_->send_goal(a.robot, g.id, g.target.x(), g.target.y());
+        new (&lock) std::lock_guard<std::mutex>(ros_->state_mutex);
+        break;
+      }
+    }
+  }
+}
+
 void App::update_map_texture() {
   const auto &map = ros_->state.map;
   if (map.empty())
@@ -127,20 +221,208 @@ void App::update_map_texture() {
 }
 
 void App::render_ui() {
-  int w, h;
-  glfwGetFramebufferSize(window_, &w, &h);
-  ImVec2 size = {(float)w, (float)h};
+  const ImGuiViewport *vp = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(vp->WorkPos);
+  ImGui::SetNextWindowSize(vp->WorkSize);
 
-  ImGui::SetNextWindowSize(size, ImGuiCond_Always);
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-  ImGui::Begin("Map", nullptr,
-               ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                   ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar);
+  ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
+                           ImGuiWindowFlags_NoMove |
+                           ImGuiWindowFlags_NoBringToFrontOnFocus;
+
+  ImGui::Begin("Fleet Commander", nullptr, flags);
+  float padding = ImGui::GetStyle().WindowPadding.y;
+
+  float toolbar_h = ImGui::GetFrameHeight() * 2.0f + padding * 3.0f;
+  float status_bar_h = ImGui::GetFrameHeight() + padding * 2.0f;
+
+  float content_h = vp->WorkSize.y - toolbar_h - status_bar_h - padding;
+
+  render_toolbar();
+
+  float content_y = vp->WorkPos.y + toolbar_h;
+  float content_w = vp->WorkSize.x;
+
+  ImGui::SetCursorScreenPos(ImVec2(vp->WorkPos.x, content_y));
+  ImGui::BeginChild("Map Panel", ImVec2(content_w - panel_width_, content_h),
+                    ImGuiChildFlags_Border);
+
   render_map_panel();
-  ImGui::End();
-  ImGui::PopStyleVar();
+  ImGui::EndChild();
 
+  ImGui::SetCursorScreenPos(
+      ImVec2(vp->WorkPos.x + content_w - panel_width_, content_y));
+  ImGui::BeginChild("Status Panel", ImVec2(panel_width_, content_h),
+                    ImGuiChildFlags_Border);
+
+  render_status_panel();
+  ImGui::EndChild();
+
+  ImGui::SetCursorScreenPos(
+      ImVec2(vp->WorkPos.x, content_y + content_h + padding));
   render_status_bar();
+  ImGui::End();
+}
+
+void App::render_toolbar() {
+  // row1
+  ImGui::TextDisabled("Fleet Commander");
+  ImGui::SameLine(0.0f, 30.0f);
+  ImGui::TextDisabled("Click on the map to send Goals");
+
+  // row2
+  ImGui::Text("Cost Function:");
+  ImGui::SameLine();
+  const char *cost_names[] = {"Euclidean", "Heading-Aware"};
+  ImGui::SetNextItemWidth(130.0f);
+  ImGui::Combo("##cost", &selected_cost_fn_, cost_names, 2);
+
+  ImGui::SameLine(0.0f, 20.0f);
+
+  ImGui::Text("Mex Goals/Robot");
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(60.0f);
+  ImGui::DragInt("##max", &max_goals_per_robot_, 0.1f, 1, 10);
+}
+
+void App::render_status_panel() {
+  std::lock_guard<std::mutex> lock(ros_->state_mutex);
+  auto &s = ros_->state;
+
+  if (ImGui::CollapsingHeader("Robots", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (s.robots.empty()) {
+      ImGui::TextDisabled("No Robots discovered");
+    }
+
+    for (const auto &[id, robot] : s.robots) {
+
+      ImVec4 color = robot.status == RobotStatus::Idle ? ImVec4(0, 1, 0, 1)
+                     : robot.status == RobotStatus::Navigating
+                         ? ImVec4(1, 1, 0, 1)
+                         : ImVec4(1, 0, 0, 1);
+
+      ImGui::TextColored(color, "%s", id.c_str());
+
+      ImGui::SameLine();
+      ImGui::TextDisabled("[%s]", robot.status == RobotStatus::Idle ? "idle"
+                                  : robot.status == RobotStatus::Navigating
+                                      ? "nav"
+                                      : "offline");
+
+      if (!robot.current_goal_id.empty()) {
+        ImGui::Text("Goal: %s", robot.current_goal_id.c_str());
+      }
+
+      auto staleness =
+          std::chrono::duration_cast<std::chrono::seconds>(
+              std::chrono::steady_clock::now() - robot.last_tf_update)
+              .count();
+
+      if (staleness > 3) {
+        ImGui::TextColored(ImVec4(1, 0, 0, 1), "Last seen : %lds ago",
+                           staleness);
+      }
+
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::Spacing();
+    }
+  }
+  ImGui::Spacing();
+
+  if (ImGui::CollapsingHeader("Goals", ImGuiTreeNodeFlags_DefaultOpen)) {
+
+    if (s.goals.empty()) {
+      ImGui::TextDisabled("No goals. Click on the map to set one");
+    } else {
+
+      auto sorted = s.goals;
+      std::sort(sorted.begin(), sorted.end(),
+                [](const GoalState &a, const GoalState &b) {
+                  auto order = [](GoalStatus s) {
+                    switch (s) {
+                    case GoalStatus::Active:
+                      return 0;
+                    case GoalStatus::Pending:
+                      return 1;
+                    case GoalStatus::Succeeded:
+                      return 2;
+                    case GoalStatus::Failed:
+                      return 3;
+                    case GoalStatus::Cancelled:
+                      return 4;
+                    }
+                    return 5;
+                  };
+                  return order(a.status) < order(b.status);
+                });
+
+      if (ImGui::BeginTable("Goals", 4,
+                            ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("ID");
+        ImGui::TableSetupColumn("Co-ord");
+        ImGui::TableSetupColumn("Status");
+        ImGui::TableSetupColumn("Robot");
+        ImGui::TableHeadersRow();
+
+        for (const auto &g : sorted) {
+
+          ImVec4 color =
+              g.status == GoalStatus::Pending     ? ImVec4(1, 0.65f, 0, 1)
+              : g.status == GoalStatus::Active    ? ImVec4(1, 1, 0, 1)
+              : g.status == GoalStatus::Succeeded ? ImVec4(0, 1, 0, 1)
+              : g.status == GoalStatus::Failed    ? ImVec4(1, 0, 0, 1)
+                                                  : ImVec4(0.5f, 0.5f, 0.5f, 1);
+
+          ImGui::TableNextRow();
+
+          // column 0
+          ImGui::TableSetColumnIndex(0);
+          ImGui::Text("%s", g.id.c_str());
+
+          // column 1
+          ImGui::TableSetColumnIndex(1);
+          ImGui::Text("(%.1f, %.1f)", g.target.x(), g.target.y());
+
+          // column 2
+          ImGui::TableSetColumnIndex(2);
+          ImGui::TextColored(color, "%s", GoalState::status_icon(g.status));
+
+          // column 3
+          ImGui::TableSetColumnIndex(3);
+          ImGui::Text(
+              "%s", g.assigned_robot.empty() ? "-" : g.assigned_robot.c_str());
+        }
+        ImGui::EndTable();
+      }
+    }
+  }
+}
+
+void App::render_status_bar() {
+
+  std::lock_guard<std::mutex> lock(ros_->state_mutex);
+  auto &s = ros_->state;
+
+  int robot_count = s.robots.size();
+  int active = 0, pending = 0;
+
+  for (const auto &g : s.goals) {
+    if (g.status == GoalStatus::Active)
+      active++;
+    if (g.status == GoalStatus::Pending)
+      pending++;
+  }
+
+  ImGui::Text(" Robots: %d | Active Goals: %d| Pending Goals: %d| Map: %dx%d",
+              robot_count, active, pending, s.map.width, s.map.height);
+
+  if (!status_msg_.empty()) {
+    ImGui::SameLine();
+    ImGui::Text("|");
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", status_msg_.c_str());
+  }
 }
 
 void App::render_map_panel() {
@@ -236,7 +518,8 @@ void App::render_map_panel() {
     float local_x = (mouse.x - cursor.x) / display_w;
     float local_y = (mouse.y - cursor.y) / display_h;
 
-    if (local_x >= 0.0f && local_x <= 1.0f && local_y >= 0.0f && local_y <= 1.0f) {
+    if (local_x >= 0.0f && local_x <= 1.0f && local_y >= 0.0f &&
+        local_y <= 1.0f) {
       int pixel_x = static_cast<int>(local_x * s.map.width);
       int pixel_y = static_cast<int>(local_y * s.map.height);
 
@@ -263,5 +546,3 @@ void App::render_map_panel() {
     }
   }
 }
-
-void App::render_status_bar() { return; }
