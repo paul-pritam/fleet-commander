@@ -10,6 +10,9 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+enable_testing()
+
+find_package(GTest REQUIRED)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(nav_msgs REQUIRED)
@@ -83,6 +86,10 @@ add_executable(fleet_commander
   src/scheduler.cpp
 )
 
+add_executable(fleet_tests
+  tests/test_state.cpp
+)
+
 ament_target_dependencies(fleet_commander
 rclcpp
 nav_msgs
@@ -95,6 +102,17 @@ target_include_directories(fleet_commander PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+target_include_directories(fleet_tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(fleet_tests
+  GTest::gtest
+  GTest::gtest_main
+  Eigen3::Eigen
+  ${UUID_LIBRARY}
+)
+
 target_link_libraries(fleet_commander
   imgui_lib
   glfw
@@ -103,6 +121,8 @@ target_link_libraries(fleet_commander
   ${UUID_LIBRARY}
 )
 
+include(GoogleTest)
+gtest_discover_tests(fleet_tests)
 
 install(TARGETS fleet_commander
   DESTINATION lib/${PROJECT_NAME})
