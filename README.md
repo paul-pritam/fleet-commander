@@ -49,12 +49,12 @@ Fleet Commander decouples ROS 2 asynchronous communication from the OpenGL rende
 ### Core Components
 
 - **OpenGL Occupancy Grid Ingestion (`App::update_map_texture`)**: Ingests `nav_msgs/msg/OccupancyGrid` messages and uploads rasterized costmap bytes directly into an OpenGL 2D texture. Uses `GL_NEAREST` texture filtering to preserve exact cell borders without interpolation blur. Provides bi-directional mapping between continuous world coordinates (meters) and discrete map pixel indices via `world_to_pixel` and `pixel_to_world`.
-- **Multi-Robot Transform Tracking (`RosBridge::update_robot_pose`)**: Discovers robots under dynamic namespaces (such as `/bcr_bot_1`, `/bcr_bot_2`). Reconstructs each robot's world pose by composing `map -> odom` and `odom -> base_link` transform frames received over `/tf`. Tracks position (x, y), planar heading (yaw), and update recency to detect stale or disconnected robots via `is_reachable()`.
-- **Asynchronous Nav2 Dispatch (`RosBridge::send_goal`)**: Maintains an active `rclcpp_action::Client<nav2_msgs::action::NavigateToPose>` client for every discovered robot. Dispatches goals asynchronously with non-blocking feedback and result callbacks, ensuring the UI rendering thread maintains 60 FPS without executor stutter.
+- **Multi-Robot Transform Tracking (`RosBridge::tf_poll_timer_`)**: Discovers robots under dynamic namespaces (such as `/bcr_bot_1`, `/bcr_bot_2`). Resolves multi-hop coordinate transforms (`map -> odom -> base_footprint`) via a node-synchronized `tf2_ros::Buffer` and `TransformListener`. Performs temporal spline interpolation at 20 Hz, eliminating kinematic tearing between asynchronous AMCL and EKF streams.
+- **Asynchronous Nav2 Dispatch (`RosBridge::send_goal`)**: Maintains an active `rclcpp_action::Client<nav2_msgs::action::NavigateToPose>` client for every discovered robot. Dispatches goals asynchronously with non-blocking feedback, result callbacks, and server rejection rollback, ensuring offline or unready action servers do not lock robots into permanent navigation states.
 - **Task Scheduling (`Scheduler`)**: Assigns queued targets to available robots using pluggable cost models:
   - `EuclideanCost`: Evaluates L2 metric distance between robot position and goal coordinates.
   - `HeadingAwareCost`: Evaluates metric distance penalized by angular misalignment (delta yaw) using `std::remainder(ryaw - angle_to_goal, 2 * pi)` with configurable heading weighting.
-- **Thread Safety**: Inter-thread communication between the ROS 2 executor thread and the GLFW render loop is protected using `std::mutex` (`RosBridge::state_mutex`).
+- **Thread Isolation & Concurrency**: Decouples ROS 2 subscription deserialization and action callbacks from the OpenGL rendering loop using a dedicated 60 Hz background worker thread. Shared state access between the executor and Dear ImGui viewport is strictly guarded via `std::mutex` (`RosBridge::state_mutex`) and two-phase lock scoping.
 
 ## Prerequisites
 
@@ -66,6 +66,8 @@ Fleet Commander decouples ROS 2 asynchronous communication from the OpenGL rende
   - `rclcpp_action`
   - `nav_msgs`
   - `nav2_msgs`
+  - `tf2`
+  - `tf2_ros`
   - `tf2_msgs`
   - `action_msgs`
 - **System Libraries**:
@@ -106,7 +108,7 @@ Run a multi-robot simulation providing `/map`, `/tf`, and Nav2 action servers (f
 ```bash
 source /opt/ros/jazzy/setup.bash
 source ~/bcr_ws/install/setup.bash
-ros2 launch bcr_bot multi_robot.launch.py
+ros2 launch bcr_bot multi_bcr_bot.launch.py
 ```
 
 ### 2. Launch Fleet Commander
