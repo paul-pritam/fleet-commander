@@ -1,8 +1,10 @@
 #pragma once
 
+#include <atomic>
 #include <cmath>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "ros_bridge.hpp"
 
@@ -26,6 +28,8 @@ public:
 
 private:
   std::shared_ptr<RosBridge> ros_;
+  std::thread ros_spin_thread_;
+  std::atomic<bool> running_{false};
 
   GLFWwindow *window_ = nullptr;
   unsigned int map_texture_ = 0;

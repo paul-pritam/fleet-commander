@@ -2,7 +2,9 @@
 
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <rclcpp/timer.hpp>
 #include <string>
 
 #include <nav2_msgs/action/navigate_to_pose.hpp>
@@ -10,6 +12,8 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <tf2_msgs/msg/tf_message.hpp>
+#include <tf2_ros/buffer.hpp>
+#include <tf2_ros/transform_listener.hpp>
 
 #include "state.hpp"
 
@@ -64,4 +68,8 @@ private:
   std::map<std::string, OdomOffset> odom_base_transforms_;
 
   rclcpp::TimerBase::SharedPtr discovery_timer_;
+
+  std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+  rclcpp::TimerBase::SharedPtr tf_poll_timer_;
 };

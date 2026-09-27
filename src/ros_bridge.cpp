@@ -11,15 +11,49 @@ RosBridge::RosBridge() : Node("fleet_commander") {
   map_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
       "/map", map_qos,
       std::bind(&RosBridge::map_callback, this, std::placeholders::_1));
-  tf_sub_ = create_subscription<tf2_msgs::msg::TFMessage>(
-      "/tf", rclcpp::QoS(100),
-      std::bind(&RosBridge::tf_callback, this, std::placeholders::_1));
+  // Legacy subscription disabled: replaced by tf2_ros::Buffer and tf_poll_timer_
+  // tf_sub_ = create_subscription<tf2_msgs::msg::TFMessage>(
+  //     "/tf", rclcpp::QoS(100),
+  //     std::bind(&RosBridge::tf_callback, this, std::placeholders::_1));
 
   map_retry_timer_ = create_wall_timer(
       std::chrono::seconds(2), std::bind(&RosBridge::try_subscribe_map, this));
 
   discovery_timer_ = create_wall_timer(
       std::chrono::seconds(2), std::bind(&RosBridge::discover_robots, this));
+
+  this->declare_parameter("use_sim_time", true);
+
+  tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+
+  tf_poll_timer_ =
+      this->create_wall_timer(std::chrono::milliseconds(50), [this]() {
+        std::lock_guard<std::mutex> lock(state_mutex);
+        for (auto &[ns, robot] : state.robots) {
+          try {
+            auto t = tf_buffer_->lookupTransform("map", ns + "/base_footprint",
+                                                 tf2::TimePointZero);
+
+            robot.pose.x = t.transform.translation.x;
+            robot.pose.y = t.transform.translation.y;
+
+            tf2::Quaternion q(t.transform.rotation.x, t.transform.rotation.y,
+                              t.transform.rotation.z, t.transform.rotation.w);
+            double roll, pitch, yaw;
+            tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
+            robot.pose.yaw = yaw;
+
+            robot.last_tf_update = std::chrono::steady_clock::now();
+            robot.last_tf_update_sec = this->now().seconds();
+            if (robot.status == RobotStatus::Offline) {
+              robot.status = RobotStatus::Idle;
+            }
+          } catch (const tf2::TransformException &ex) {
+            continue;
+          }
+        }
+      });
 
   RCLCPP_INFO(get_logger(), "Fleet commander RosBridge init");
 }
@@ -174,11 +208,9 @@ void RosBridge::discover_robots() {
     action_clients_[ns] = client;
 
     RCLCPP_INFO(get_logger(),
-                "Created aan action client for %s (action: %s, ready: %s)",
+                "Created an action client for %s (action: %s, ready: %s)",
                 ns.c_str(), action_name.c_str(),
                 client->action_server_is_ready() ? "yes" : "no");
-
-    subscribe_robot_tf(ns);
   }
 
   auto topics = get_topic_names_and_types();
@@ -204,11 +236,17 @@ void RosBridge::discover_robots() {
     auto client =
         rclcpp_action::create_client<NavigateToPose>(this, action_topic);
     action_clients_[ns] = client;
+
+    if (!state.robots.count(ns)) {
+      auto &r = state.robots[ns];
+      r.id = ns;
+      r.status = RobotStatus::Offline;
+    }
+
     RCLCPP_INFO(get_logger(),
                 "Discovered robot via topic: %s (action: %s, ready: %s)",
                 ns.c_str(), action_topic.c_str(),
                 client->action_server_is_ready() ? "yes" : "no");
-    subscribe_robot_tf(ns);
   }
 }
 

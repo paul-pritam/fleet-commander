@@ -17,6 +17,8 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(tf2_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(nav2_msgs REQUIRED)
@@ -91,12 +93,15 @@ add_executable(fleet_tests
 )
 
 ament_target_dependencies(fleet_commander
-rclcpp
-nav_msgs
-tf2_msgs
-rclcpp_action
-nav2_msgs
-action_msgs)
+  rclcpp
+  nav_msgs
+  tf2
+  tf2_ros
+  tf2_msgs
+  rclcpp_action
+  nav2_msgs
+  action_msgs
+)
 
 target_include_directories(fleet_commander PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include

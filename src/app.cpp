@@ -12,7 +12,10 @@
 #include <imgui_impl_opengl3.h>
 #include <memory>
 #include <mutex>
+#include <rclcpp/executors.hpp>
+#include <rclcpp/utilities.hpp>
 #include <string>
+#include <thread>
 #include <vector>
 
 App::App() = default;
@@ -27,6 +30,17 @@ void App::shutdown() {
     window_ = nullptr;
   }
   glfwTerminate();
+
+  running_ = false;
+
+  if (ros_spin_thread_.joinable()) {
+    ros_spin_thread_.join();
+  }
+
+  if (map_texture_) {
+    glDeleteTextures(1, &map_texture_);
+    map_texture_ = 0;
+  }
 }
 
 bool App::init(int height, int width, const char *title) {
@@ -101,6 +115,17 @@ bool App::init(int height, int width, const char *title) {
 
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                placeholder);
+
+  running_ = true;
+
+  ros_spin_thread_ = std::thread([this]() {
+    rclcpp::WallRate loop_rate(60);
+    while (running_ && rclcpp::ok()) {
+      rclcpp::spin_some(ros_);
+      loop_rate.sleep();
+    }
+  });
+
   return true;
 }
 
@@ -108,7 +133,6 @@ void App::run() {
 
   while (!glfwWindowShouldClose(window_)) {
     glfwPollEvents();
-    rclcpp::spin_some(ros_);
     process_ros_events();
     try_assign_goals();
 
