@@ -1,4 +1,5 @@
 #include "ros_bridge.hpp"
+#include "state.hpp"
 #include <cmath>
 #include <memory>
 #include <mutex>
@@ -225,7 +226,7 @@ void RosBridge::subscribe_robot_tf(const std::string &robot_ns) {
   RCLCPP_INFO(get_logger(), "Subscribed to Tf for robot: %s", robot_ns.c_str());
 }
 
-void RosBridge::send_goal(const std::string &robot_id,
+bool RosBridge::send_goal(const std::string &robot_id,
                           const std::string &goal_id, double x, double y) {
 
   auto it = action_clients_.find(robot_id);
@@ -233,7 +234,7 @@ void RosBridge::send_goal(const std::string &robot_id,
   if (it == action_clients_.end()) {
     RCLCPP_WARN(get_logger(), "No action client for robot %s",
                 robot_id.c_str());
-    return;
+    return false;
   }
 
   auto client = it->second;
@@ -242,7 +243,7 @@ void RosBridge::send_goal(const std::string &robot_id,
     RCLCPP_WARN(get_logger(),
                 "Action server for %s is not ready , retrying.........",
                 robot_id.c_str());
-    return;
+    return false;
   }
 
   auto goal = NavigateToPose::Goal();
@@ -254,6 +255,29 @@ void RosBridge::send_goal(const std::string &robot_id,
 
   auto opts = rclcpp_action::Client<NavigateToPose>::SendGoalOptions();
 
+  opts.goal_response_callback =
+      [this, robot_id, goal_id](const GoalHandleNav::SharedPtr &goal_handle) {
+        if (!goal_handle) {
+          RCLCPP_ERROR(get_logger(),
+                       "Goal %s rejected by %s! Rolling back to Pending.",
+                       goal_id.c_str(), robot_id.c_str());
+          std::lock_guard<std::mutex> lock(state_mutex);
+          for (auto &g : state.goals) {
+            if (g.id == goal_id) {
+              g.status = GoalStatus::Pending;
+              break;
+            }
+          }
+          for (auto &[_, r] : state.robots) {
+            if (r.id == robot_id) {
+              r.status = RobotStatus::Idle;
+              r.current_goal_id.clear();
+              break;
+            }
+          }
+        }
+      };
+
   opts.result_callback = [this, robot_id,
                           goal_id](const GoalHandleNav::WrappedResult &result) {
     bool success = (result.code == rclcpp_action::ResultCode::SUCCEEDED);
@@ -261,4 +285,5 @@ void RosBridge::send_goal(const std::string &robot_id,
       on_goal_result(goal_id, robot_id, success);
   };
   client->async_send_goal(goal, opts);
+  return true;
 }

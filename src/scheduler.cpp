@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <map>
 #include <numbers>
 #include <set>
 #include <string>
@@ -27,6 +28,7 @@ double HeadingAwareCost::compute_cost(double rx, double ry, double ryaw,
   double yaw_diff =
       std::remainder(ryaw - angle_to_goal, 2.0 * std::numbers::pi);
 
+  yaw_diff = std::abs(yaw_diff);
   constexpr double HEADING_WEIGHT = 1.2;
 
   return dist + yaw_diff * HEADING_WEIGHT;
@@ -37,6 +39,7 @@ const char *HeadingAwareCost::name() const { return "HeadingAwareCost"; }
 std::vector<Assignment>
 Scheduler::assign_goals(const std::vector<AssignmentInput> &robots,
                         const std::vector<GoalInput> &goals) const {
+  std::map<std::string, size_t> robots_assigned_count;
   std::vector<Assignment> assignments;
   std::set<std::string> used_robots, used_goals;
 
@@ -61,8 +64,13 @@ Scheduler::assign_goals(const std::vector<AssignmentInput> &robots,
     const auto &r = robots[e.ri].name;
     const auto &g = goals[e.gi].id;
 
-    if (used_robots.count(r) || used_goals.count(g))
+    if (used_goals.count(g)) {
       continue;
+    }
+
+    if (robots_assigned_count[r] >= max_goals_) {
+      continue;
+    }
 
     // skip if robot has max_goals_
     size_t count = 0;
@@ -74,8 +82,8 @@ Scheduler::assign_goals(const std::vector<AssignmentInput> &robots,
 
     // make assignments
     assignments.push_back({r, g});
-    used_robots.insert(r);
     used_goals.insert(g);
+    robots_assigned_count[r]++;
   }
 
   return assignments;

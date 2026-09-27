@@ -35,7 +35,7 @@ public:
                      bool success)>
       on_goal_result;
 
-  void send_goal(const std::string &robot_id, const std::string &goal_id,
+  bool send_goal(const std::string &robot_id, const std::string &goal_id,
                  double x, double y);
 
 private:

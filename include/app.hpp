@@ -8,6 +8,13 @@
 
 struct GLFWwindow;
 
+struct GoalDispatch {
+  std::string robot_id;
+  std::string goal_id;
+  double x = 0.0;
+  double y = 0.0;
+};
+
 class App {
 public:
   App();

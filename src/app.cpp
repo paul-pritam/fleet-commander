@@ -139,61 +139,82 @@ void App::process_ros_events() {
 }
 
 void App::try_assign_goals() {
-  std::lock_guard<std::mutex> lock(ros_->state_mutex);
 
-  auto &s = ros_->state;
+  std::vector<GoalDispatch> dispatches;
+  {
+    std::lock_guard<std::mutex> lock(ros_->state_mutex);
 
-  auto pending = s.pending_goals();
-  auto idle = s.idle_robots();
+    auto &s = ros_->state;
 
-  if (pending.empty() || idle.empty())
-    return;
+    auto pending = s.pending_goals();
+    auto idle = s.idle_robots();
 
-  std::vector<AssignmentInput> robots;
-  for (auto *r : idle) {
-    robots.push_back({r->id, r->pose.x, r->pose.y, r->pose.yaw});
-  }
+    if (pending.empty() || idle.empty())
+      return;
 
-  std::vector<GoalInput> goals;
-  for (auto *g : pending) {
-    goals.push_back({g->id, g->target.x(), g->target.y()});
-  }
+    std::vector<AssignmentInput> robots;
+    for (auto *r : idle) {
+      robots.push_back({r->id, r->pose.x, r->pose.y, r->pose.yaw});
+    }
 
-  std::unique_ptr<CostFunction> cost_fn;
-  if (selected_cost_fn_ == 0) {
-    cost_fn = std::make_unique<EuclideanCost>();
-  } else {
-    cost_fn = std::make_unique<HeadingAwareCost>();
-  }
-
-  Scheduler sched(std::move(cost_fn), max_goals_per_robot_);
-  auto assignments = sched.assign_goals(robots, goals);
-
-  for (const auto &a : assignments) {
+    std::vector<GoalInput> goals;
     for (auto *g : pending) {
-      if (g->id == a.goal) {
-        g->status = GoalStatus::Active;
-        g->assigned_robot = a.robot;
-        break;
-      }
+      goals.push_back({g->id, g->target.x(), g->target.y()});
     }
 
-    for (auto &[_, r] : s.robots) {
-      if (r.id == a.robot) {
-        r.status = RobotStatus::Navigating;
-        r.current_goal_id = a.goal;
-        break;
+    std::unique_ptr<CostFunction> cost_fn;
+    if (selected_cost_fn_ == 0) {
+      cost_fn = std::make_unique<EuclideanCost>();
+    } else {
+      cost_fn = std::make_unique<HeadingAwareCost>();
+    }
+
+    Scheduler sched(std::move(cost_fn), max_goals_per_robot_);
+    auto assignments = sched.assign_goals(robots, goals);
+
+    for (const auto &a : assignments) {
+      for (auto *g : pending) {
+        if (g->id == a.goal) {
+          g->status = GoalStatus::Active;
+          g->assigned_robot = a.robot;
+          break;
+        }
+      }
+
+      for (auto &[_, r] : s.robots) {
+        if (r.id == a.robot) {
+          r.status = RobotStatus::Navigating;
+          r.current_goal_id = a.goal;
+          break;
+        }
+      }
+    }
+    dispatches.reserve(assignments.size());
+    for (const auto &a : assignments) {
+      for (const auto &g : s.goals) {
+        if (g.id == a.goal) {
+          dispatches.push_back({a.robot, g.id, g.target.x(), g.target.y()});
+          break;
+        }
       }
     }
   }
-
-  for (const auto &a : assignments) {
-    for (const auto &g : s.goals) {
-      if (g.id == a.goal) {
-        lock.~lock_guard();
-        ros_->send_goal(a.robot, g.id, g.target.x(), g.target.y());
-        new (&lock) std::lock_guard<std::mutex>(ros_->state_mutex);
-        break;
+  for (const auto &d : dispatches) {
+    bool sent = ros_->send_goal(d.robot_id, d.goal_id, d.x, d.y);
+    if (!sent) {
+      std::lock_guard<std::mutex> lock(ros_->state_mutex);
+      for (auto &g : ros_->state.goals) {
+        if (g.id == d.goal_id) {
+          g.status = GoalStatus::Pending;
+          break;
+        }
+      }
+      for (auto &[_, r] : ros_->state.robots) {
+        if (r.id == d.robot_id) {
+          r.status = RobotStatus::Idle;
+          r.current_goal_id.clear();
+          break;
+        }
       }
     }
   }
@@ -452,7 +473,8 @@ void App::render_map_panel() {
 
   ImVec2 cursor = ImGui::GetCursorScreenPos();
   ImGui::Image((ImTextureID)(intptr_t)map_texture_,
-               ImVec2(display_w, display_h));
+               ImVec2(display_w, display_h), ImVec2(0.0f, 1.0f),
+               ImVec2(1.0f, 0.0f));
 
   float scale_x = display_w / s.map.width;
   float scale_y = display_h / s.map.height;
@@ -465,7 +487,7 @@ void App::render_map_panel() {
 
     auto px = s.map.world_to_pixel(robot.pose.x, robot.pose.y);
     float sx = cursor.x + px.x() * scale_x;
-    float sy = cursor.y + px.y() * scale_y;
+    float sy = cursor.y + (s.map.height - 1 - px.y()) * scale_y;
 
     ImVec4 col = robot.status == RobotStatus::Idle         ? ImVec4(0, 1, 0, 1)
                  : robot.status == RobotStatus::Navigating ? ImVec4(1, 1, 0, 1)
@@ -521,7 +543,7 @@ void App::render_map_panel() {
     if (local_x >= 0.0f && local_x <= 1.0f && local_y >= 0.0f &&
         local_y <= 1.0f) {
       int pixel_x = static_cast<int>(local_x * s.map.width);
-      int pixel_y = static_cast<int>(local_y * s.map.height);
+      int pixel_y = static_cast<int>((1 - local_y) * s.map.height);
 
       auto world = s.map.pixel_to_world(pixel_x, pixel_y);
 
