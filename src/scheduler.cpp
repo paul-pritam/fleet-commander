@@ -5,11 +5,13 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <numbers>
 #include <set>
 #include <string>
 #include <vector>
 
-double EuclideanCost::compute_cost(double rx, double ry, double ryaw, double gx,
+double EuclideanCost::compute_cost(double rx, double ry,
+                                   [[maybe_unused]] double ryaw, double gx,
                                    double gy) const {
   return (Eigen::Vector2d(rx, ry) - Eigen::Vector2d(gx, gy)).norm();
 }
@@ -22,13 +24,12 @@ double HeadingAwareCost::compute_cost(double rx, double ry, double ryaw,
 
   double angle_to_goal = std::atan2(gy - ry, gx - rx);
 
-  double yaw_diff = std::abs(ryaw - angle_to_goal);
+  double yaw_diff =
+      std::remainder(ryaw - angle_to_goal, 2.0 * std::numbers::pi);
 
-  if (yaw_diff > angle_to_goal) {
-    yaw_diff = 2.0 * M_PI - yaw_diff;
-  }
+  constexpr double HEADING_WEIGHT = 1.2;
 
-  return dist + yaw_diff * 1.0;
+  return dist + yaw_diff * HEADING_WEIGHT;
 }
 
 const char *HeadingAwareCost::name() const { return "HeadingAwareCost"; }
