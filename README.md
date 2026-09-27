@@ -4,6 +4,18 @@ A C++20 multi-robot fleet management application and visual console for autonomo
 
 Fleet Commander provides real-time occupancy grid visualization, dynamic multi-robot pose tracking across ROS namespaces, asynchronous Nav2 action dispatching, and cost-based task scheduling. The user interface is rendered using Dear ImGui and hardware-accelerated OpenGL 4.6.
 
+## Why This Project Exists
+
+RViz2 is an essential developer tool for inspecting TF trees and sensor topics, but it is resource-intensive and awkward to deploy as an operator console on a warehouse tablet or shop-floor terminal.
+
+Fleet Commander was built from scratch in C++20 to provide a dedicated, lightweight fleet dispatch station. It initializes a native OpenGL 4.6 context, boots in milliseconds, and decouples the UI rendering loop from ROS 2 DDS network traffic using a mutex-guarded state machine.
+
+### Design Trade-offs & Engineering Decisions
+
+- **Dear ImGui over Qt**: Avoids heavy moc preprocessing and bulky runtime libraries, producing a lean static binary that runs at a solid 60 FPS even on low-power companion screens.
+- **GL_NEAREST Texture Filtering**: Standard linear interpolation smooths out cell boundaries, turning crisp occupancy grids into blurry gradients. Nearest-neighbor sampling preserves exact costmap cell boundaries.
+- **Heading-Aware Cost Scheduling**: Standard Euclidean distance assigns whichever robot is geographically closest, even if it is pointed in the opposite direction. On differential-drive robots, large in-place turns take time and scrub wheels. `HeadingAwareCost` accounts for initial heading alignment to reduce total mission duration.
+
 ## Architecture
 
 Fleet Commander decouples ROS 2 asynchronous communication from the OpenGL rendering loop through a shared, mutex-protected state machine.
