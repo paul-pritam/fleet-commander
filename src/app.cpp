@@ -497,8 +497,8 @@ void App::render_map_panel() {
 
   ImVec2 cursor = ImGui::GetCursorScreenPos();
   ImGui::Image((ImTextureID)(intptr_t)map_texture_,
-               ImVec2(display_w, display_h), ImVec2(0.0f, 1.0f),
-               ImVec2(1.0f, 0.0f));
+               ImVec2(display_w, display_h), ImVec2(0.0f, 0.0f),
+               ImVec2(1.0f, 1.0f));
 
   float scale_x = display_w / s.map.width;
   float scale_y = display_h / s.map.height;
@@ -511,7 +511,7 @@ void App::render_map_panel() {
 
     auto px = s.map.world_to_pixel(robot.pose.x, robot.pose.y);
     float sx = cursor.x + px.x() * scale_x;
-    float sy = cursor.y + (s.map.height - 1 - px.y()) * scale_y;
+    float sy = cursor.y + px.y() * scale_y;
 
     ImVec4 col = robot.status == RobotStatus::Idle         ? ImVec4(0, 1, 0, 1)
                  : robot.status == RobotStatus::Navigating ? ImVec4(1, 1, 0, 1)
@@ -567,7 +567,7 @@ void App::render_map_panel() {
     if (local_x >= 0.0f && local_x <= 1.0f && local_y >= 0.0f &&
         local_y <= 1.0f) {
       int pixel_x = static_cast<int>(local_x * s.map.width);
-      int pixel_y = static_cast<int>((1 - local_y) * s.map.height);
+      int pixel_y = static_cast<int>(local_y * s.map.height);
 
       auto world = s.map.pixel_to_world(pixel_x, pixel_y);
 

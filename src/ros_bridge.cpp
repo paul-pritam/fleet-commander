@@ -54,9 +54,26 @@ RosBridge::RosBridge() : Node("fleet_commander") {
               robot.status = RobotStatus::Idle;
             }
           } catch (const tf2::TransformException &ex) {
-            RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000,
-                                 "TF lookup for %s failed: %s", ns.c_str(), ex.what());
+            static std::map<std::string, std::string> last_err;
+            if (last_err[ns] != ex.what()) {
+              last_err[ns] = ex.what();
+              RCLCPP_WARN(get_logger(), "TF lookup for %s failed: %s", ns.c_str(), ex.what());
+            }
             continue;
+          }
+        }
+
+        static auto last_summary_time = std::chrono::steady_clock::now();
+        auto now_steady = std::chrono::steady_clock::now();
+        if (now_steady - last_summary_time > std::chrono::seconds(2)) {
+          last_summary_time = now_steady;
+          for (const auto &[ns, robot] : state.robots) {
+            auto staleness_s = std::chrono::duration_cast<std::chrono::seconds>(
+                now_steady - robot.last_tf_update).count();
+            RCLCPP_INFO(get_logger(), "ROBOT [%s]: staleness=%lds, pose=(%.2f, %.2f, %.2f), status=%s",
+                        ns.c_str(), staleness_s, robot.pose.x, robot.pose.y, robot.pose.yaw,
+                        robot.status == RobotStatus::Idle ? "Idle" :
+                        robot.status == RobotStatus::Navigating ? "Nav" : "Offline");
           }
         }
       });
