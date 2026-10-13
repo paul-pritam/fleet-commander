@@ -11,10 +11,9 @@ RosBridge::RosBridge() : Node("fleet_commander") {
   map_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
       "/map", map_qos,
       std::bind(&RosBridge::map_callback, this, std::placeholders::_1));
-  // Legacy subscription disabled: replaced by tf2_ros::Buffer and tf_poll_timer_
-  // tf_sub_ = create_subscription<tf2_msgs::msg::TFMessage>(
-  //     "/tf", rclcpp::QoS(100),
-  //     std::bind(&RosBridge::tf_callback, this, std::placeholders::_1));
+  tf_sub_ = create_subscription<tf2_msgs::msg::TFMessage>(
+      "/tf", rclcpp::QoS(100),
+      std::bind(&RosBridge::tf_callback, this, std::placeholders::_1));
 
   map_retry_timer_ = create_wall_timer(
       std::chrono::seconds(2), std::bind(&RosBridge::try_subscribe_map, this));
@@ -29,7 +28,8 @@ RosBridge::RosBridge() : Node("fleet_commander") {
   }
 
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
-  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+  tf_buffer_->setUsingDedicatedThread(true);
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, true);
 
   tf_poll_timer_ =
       this->create_wall_timer(std::chrono::milliseconds(50), [this]() {
@@ -37,8 +37,7 @@ RosBridge::RosBridge() : Node("fleet_commander") {
         for (auto &[ns, robot] : state.robots) {
           try {
             auto t = tf_buffer_->lookupTransform("map", ns + "/base_footprint",
-                                                 tf2::TimePointZero,
-                                                 tf2::durationFromSec(0.05));
+                                                 tf2::TimePointZero);
 
             robot.pose.x = t.transform.translation.x;
             robot.pose.y = t.transform.translation.y;
@@ -253,6 +252,7 @@ void RosBridge::discover_robots() {
       auto &r = state.robots[ns];
       r.id = ns;
       r.status = RobotStatus::Offline;
+      r.last_tf_update = std::chrono::steady_clock::now();
 
       RCLCPP_INFO(get_logger(),
                   "Discovered robot %s (action: %s, ready: %s)",

@@ -47,7 +47,8 @@ struct RobotState {
   RobotPose pose;
   RobotStatus status = RobotStatus::Idle;
   std::string current_goal_id;
-  std::chrono::steady_clock::time_point last_tf_update;
+  std::chrono::steady_clock::time_point last_tf_update =
+      std::chrono::steady_clock::now();
   double last_tf_update_sec = 0.0;
 
   float distance_to(const Eigen::Vector2d &point) const {
