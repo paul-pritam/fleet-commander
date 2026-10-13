@@ -220,37 +220,42 @@ void RosBridge::discover_robots() {
   auto topics = get_topic_names_and_types();
 
   for (const auto &[topic_name, types] : topics) {
-    if (!topic_name.ends_with("/navigate_to_pose/_action/send_goal"))
-      continue;
-
     std::string ns;
-    std::string action_topic =
-        topic_name.substr(0, topic_name.size() - strlen("/_action/send_goal"));
-    size_t nav_pos = action_topic.rfind("/navigate_to_pose");
 
-    if (nav_pos != std::string::npos && nav_pos > 0) {
-      ns = action_topic.substr(1, nav_pos - 1);
+    if (topic_name.ends_with("/cmd_vel") && topic_name.size() > strlen("/cmd_vel")) {
+      ns = topic_name.substr(1, topic_name.size() - strlen("/cmd_vel") - 1);
+    } else if (topic_name.ends_with("/navigate_to_pose/_action/send_goal")) {
+      std::string action_topic =
+          topic_name.substr(0, topic_name.size() - strlen("/_action/send_goal"));
+      size_t nav_pos = action_topic.rfind("/navigate_to_pose");
+      if (nav_pos != std::string::npos && nav_pos > 0) {
+        ns = action_topic.substr(1, nav_pos - 1);
+      }
     } else {
       continue;
     }
 
-    if (ns.empty() || action_clients_.count(ns))
+    if (ns.empty() || ns.find('/') != std::string::npos)
       continue;
 
-    auto client =
-        rclcpp_action::create_client<NavigateToPose>(this, action_topic);
-    action_clients_[ns] = client;
+    std::string action_name = "/" + ns + "/navigate_to_pose";
+
+    if (!action_clients_.count(ns)) {
+      auto client =
+          rclcpp_action::create_client<NavigateToPose>(this, action_name);
+      action_clients_[ns] = client;
+    }
 
     if (!state.robots.count(ns)) {
       auto &r = state.robots[ns];
       r.id = ns;
       r.status = RobotStatus::Offline;
-    }
 
-    RCLCPP_INFO(get_logger(),
-                "Discovered robot via topic: %s (action: %s, ready: %s)",
-                ns.c_str(), action_topic.c_str(),
-                client->action_server_is_ready() ? "yes" : "no");
+      RCLCPP_INFO(get_logger(),
+                  "Discovered robot %s (action: %s, ready: %s)",
+                  ns.c_str(), action_name.c_str(),
+                  action_clients_[ns]->action_server_is_ready() ? "yes" : "no");
+    }
   }
 }
 
