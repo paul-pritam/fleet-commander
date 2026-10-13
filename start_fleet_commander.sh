@@ -13,4 +13,4 @@ unset __GLX_VENDOR_LIBRARY_NAME
 unset LIBVA_DRIVER_NAME
 
 echo "Starting Fleet Commander GUI..."
-exec $HOME/fleet_commander/install/fleet_commander/lib/fleet_commander/fleet_commander "$@"
+exec $HOME/fleet_commander/install/fleet_commander/lib/fleet_commander/fleet_commander --ros-args -p use_sim_time:=true "$@"

@@ -37,7 +37,8 @@ RosBridge::RosBridge() : Node("fleet_commander") {
         for (auto &[ns, robot] : state.robots) {
           try {
             auto t = tf_buffer_->lookupTransform("map", ns + "/base_footprint",
-                                                 tf2::TimePointZero);
+                                                 tf2::TimePointZero,
+                                                 tf2::durationFromSec(0.05));
 
             robot.pose.x = t.transform.translation.x;
             robot.pose.y = t.transform.translation.y;
@@ -54,6 +55,8 @@ RosBridge::RosBridge() : Node("fleet_commander") {
               robot.status = RobotStatus::Idle;
             }
           } catch (const tf2::TransformException &ex) {
+            RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000,
+                                 "TF lookup for %s failed: %s", ns.c_str(), ex.what());
             continue;
           }
         }
