@@ -22,7 +22,11 @@ RosBridge::RosBridge() : Node("fleet_commander") {
   discovery_timer_ = create_wall_timer(
       std::chrono::seconds(2), std::bind(&RosBridge::discover_robots, this));
 
-  this->declare_parameter("use_sim_time", true);
+  if (!this->has_parameter("use_sim_time")) {
+    this->declare_parameter("use_sim_time", true);
+  } else {
+    this->set_parameter(rclcpp::Parameter("use_sim_time", true));
+  }
 
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
