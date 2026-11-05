@@ -132,10 +132,31 @@ struct GoalState {
   }
 };
 
+struct VlaTargetState {
+  bool active = false;
+  std::string prompt = "yellow shelf";
+  std::string detected_class;
+  float confidence = 0.0f;
+  Eigen::Vector2d target_pos = Eigen::Vector2d::Zero();
+  Eigen::Vector2d goal_pos = Eigen::Vector2d::Zero();
+  double goal_yaw = 0.0;
+  double standoff_dist = 0.90;
+  std::chrono::steady_clock::time_point last_update =
+      std::chrono::steady_clock::now();
+
+  bool is_fresh() const {
+    return active && (std::chrono::duration<double>(
+                          std::chrono::steady_clock::now() - last_update)
+                          .count() < 4.0);
+  }
+};
+
 struct FleetState {
   std::map<std::string, RobotState> robots;
   std::vector<GoalState> goals;
   MapData map;
+  VlaTargetState vla_target;
+
   void add_goal(GoalState goal) {
     goals.push_back(
         std::move(goal)); // goal is moved instead of copy , saves some memory

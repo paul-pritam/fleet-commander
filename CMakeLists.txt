@@ -23,6 +23,8 @@ find_package(Eigen3 REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(action_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_library(UUID_LIBRARY uuid REQUIRED)
 
 include (FetchContent)
@@ -101,6 +103,8 @@ ament_target_dependencies(fleet_commander
   rclcpp_action
   nav2_msgs
   action_msgs
+  geometry_msgs
+  std_msgs
 )
 
 target_include_directories(fleet_commander PRIVATE

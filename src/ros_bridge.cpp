@@ -24,6 +24,15 @@ RosBridge::RosBridge()
   discovery_timer_ = create_wall_timer(
       std::chrono::seconds(2), std::bind(&RosBridge::discover_robots, this));
 
+  vla_prompt_pub_ = create_publisher<std_msgs::msg::String>(
+      "/fleet_commander/natural_prompt", 10);
+  vla_pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
+      "/bcr_bot_1/vla_target_pose", 10,
+      std::bind(&RosBridge::vla_pose_callback, this, std::placeholders::_1));
+  vla_status_sub_ = create_subscription<std_msgs::msg::String>(
+      "/bcr_bot_1/vla_status", 10,
+      std::bind(&RosBridge::vla_status_callback, this, std::placeholders::_1));
+
   if (!this->has_parameter("use_sim_time")) {
     this->declare_parameter("use_sim_time", true);
   } else {
@@ -287,7 +296,8 @@ void RosBridge::subscribe_robot_tf(const std::string &robot_ns) {
 }
 
 bool RosBridge::send_goal(const std::string &robot_id,
-                          const std::string &goal_id, double x, double y) {
+                          const std::string &goal_id, double x, double y,
+                          double yaw) {
 
   auto it = action_clients_.find(robot_id);
 
@@ -311,7 +321,10 @@ bool RosBridge::send_goal(const std::string &robot_id,
   goal.pose.header.stamp = now(); // rclcpp::Node::now()
   goal.pose.pose.position.x = x;
   goal.pose.pose.position.y = y;
-  goal.pose.pose.orientation.w = 1.0;
+  goal.pose.pose.orientation.x = 0.0;
+  goal.pose.pose.orientation.y = 0.0;
+  goal.pose.pose.orientation.z = std::sin(yaw * 0.5);
+  goal.pose.pose.orientation.w = std::cos(yaw * 0.5);
 
   auto opts = rclcpp_action::Client<NavigateToPose>::SendGoalOptions();
 
@@ -347,3 +360,89 @@ bool RosBridge::send_goal(const std::string &robot_id,
   client->async_send_goal(goal, opts);
   return true;
 }
+
+void RosBridge::publish_vla_prompt(const std::string &prompt) {
+  if (vla_prompt_pub_) {
+    std_msgs::msg::String msg;
+    msg.data = prompt;
+    vla_prompt_pub_->publish(msg);
+    std::lock_guard<std::mutex> lock(state_mutex);
+    state.vla_target.prompt = prompt;
+  }
+}
+
+void RosBridge::vla_pose_callback(
+    const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+  std::lock_guard<std::mutex> lock(state_mutex);
+  state.vla_target.active = true;
+  state.vla_target.goal_pos.x() = msg->pose.position.x;
+  state.vla_target.goal_pos.y() = msg->pose.position.y;
+
+  double qz = msg->pose.orientation.z;
+  double qw = msg->pose.orientation.w;
+  state.vla_target.goal_yaw = 2.0 * std::atan2(qz, qw);
+  state.vla_target.last_update = std::chrono::steady_clock::now();
+}
+
+void RosBridge::vla_status_callback(
+    const std_msgs::msg::String::SharedPtr msg) {
+  std::lock_guard<std::mutex> lock(state_mutex);
+  try {
+    const std::string &s = msg->data;
+    auto find_val = [&](const std::string &key) -> std::string {
+      size_t pos = s.find("\"" + key + "\":");
+      if (pos == std::string::npos)
+        return "";
+      pos += key.length() + 2;
+      while (pos < s.size() && (s[pos] == ' ' || s[pos] == '\"'))
+        pos++;
+      size_t end = pos;
+      while (end < s.size() && s[end] != ',' && s[end] != '}' &&
+             s[end] != '\"')
+        end++;
+      return s.substr(pos, end - pos);
+    };
+
+    std::string cls = find_val("detected_class");
+    if (!cls.empty())
+      state.vla_target.detected_class = cls;
+    std::string conf_str = find_val("confidence");
+    if (!conf_str.empty())
+      state.vla_target.confidence = std::stof(conf_str);
+    std::string tx_str = find_val("target_x");
+    std::string ty_str = find_val("target_y");
+    if (!tx_str.empty() && !ty_str.empty()) {
+      state.vla_target.target_pos.x() = std::stod(tx_str);
+      state.vla_target.target_pos.y() = std::stod(ty_str);
+    }
+  } catch (...) {
+  }
+}
+
+bool RosBridge::dispatch_vla_goal() {
+  std::lock_guard<std::mutex> lock(state_mutex);
+  if (!state.vla_target.is_fresh()) {
+    RCLCPP_WARN(get_logger(), "No fresh VLA target to dispatch");
+    return false;
+  }
+  std::string robot_id = "bcr_bot_1";
+  if (!state.robots.count(robot_id)) {
+    if (!state.robots.empty())
+      robot_id = state.robots.begin()->first;
+    else
+      return false;
+  }
+
+  std::string goal_id = generate_goal_id();
+  GoalState g;
+  g.id = goal_id;
+  g.target = state.vla_target.goal_pos;
+  g.status = GoalStatus::Active;
+  g.assigned_robot = robot_id;
+  g.created_at = std::chrono::steady_clock::now();
+  state.add_goal(g);
+
+  return send_goal(robot_id, goal_id, state.vla_target.goal_pos.x(),
+                   state.vla_target.goal_pos.y(), state.vla_target.goal_yaw);
+}
+

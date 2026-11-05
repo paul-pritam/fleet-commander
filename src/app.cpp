@@ -505,6 +505,72 @@ void App::render_status_panel() {
       }
     }
   }
+
+  ImGui::Spacing();
+  if (ImGui::CollapsingHeader("Embodied VLA Console",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+    static char prompt_input[128] = "yellow shelf";
+    ImGui::Text("Natural Language Query:");
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::InputText("##vla_prompt", prompt_input, sizeof(prompt_input),
+                         ImGuiInputTextFlags_EnterReturnsTrue)) {
+      ros_->publish_vla_prompt(prompt_input);
+    }
+    if (ImGui::Button("Ground Visual Target", ImVec2(-1.0f, 26.0f))) {
+      ros_->publish_vla_prompt(prompt_input);
+    }
+
+    ImGui::Spacing();
+    ImGui::TextDisabled("Quick Presets:");
+    if (ImGui::SmallButton("Yellow Shelf")) {
+      strncpy(prompt_input, "yellow shelf", sizeof(prompt_input) - 1);
+      ros_->publish_vla_prompt(prompt_input);
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Cardboard Box")) {
+      strncpy(prompt_input, "cardboard box", sizeof(prompt_input) - 1);
+      ros_->publish_vla_prompt(prompt_input);
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Pallet")) {
+      strncpy(prompt_input, "pallet", sizeof(prompt_input) - 1);
+      ros_->publish_vla_prompt(prompt_input);
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    if (s.vla_target.is_fresh()) {
+      ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.8f, 1.0f),
+                         "[+] Target Grounded in 3D");
+      ImGui::Text("Class: %s (%.1f%%)",
+                  s.vla_target.detected_class.empty()
+                      ? s.vla_target.prompt.c_str()
+                      : s.vla_target.detected_class.c_str(),
+                  s.vla_target.confidence * 100.0f);
+      ImGui::Text("Target: (%.2f, %.2f)", s.vla_target.target_pos.x(),
+                  s.vla_target.target_pos.y());
+      ImGui::Text("Dock Waypoint: (%.2f, %.2f)", s.vla_target.goal_pos.x(),
+                  s.vla_target.goal_pos.y());
+      ImGui::Text("Heading: %.1f deg",
+                  s.vla_target.goal_yaw * 180.0 / 3.141592653589793);
+
+      ImGui::Spacing();
+      ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImVec4(0.0f, 0.65f, 0.55f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                            ImVec4(0.0f, 0.85f, 0.70f, 1.0f));
+      if (ImGui::Button("Dispatch VLA Action", ImVec2(-1.0f, 30.0f))) {
+        ros_->dispatch_vla_goal();
+      }
+      ImGui::PopStyleColor(2);
+    } else {
+      ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
+                         "[?] Awaiting visual detection...");
+      ImGui::TextDisabled("Camera observing warehouse aisle.");
+    }
+  }
 }
 
 void App::render_status_bar() {
@@ -620,6 +686,45 @@ void App::render_map_panel() {
     snprintf(label, sizeof(label), "%s", g.id.c_str());
     draw_list->AddText(ImVec2(sx + 12.0f, sy), IM_COL32(255, 255, 255, 255),
                        label);
+  }
+
+  if (s.vla_target.is_fresh()) {
+    auto t_px = s.map.world_to_pixel_continuous(s.vla_target.target_pos.x(),
+                                                s.vla_target.target_pos.y());
+    float tx = cursor.x + static_cast<float>(t_px.x()) * scale_x;
+    float ty = cursor.y +
+               static_cast<float>(s.map.height - 1 - t_px.y()) * scale_y;
+
+    auto g_px = s.map.world_to_pixel_continuous(s.vla_target.goal_pos.x(),
+                                                s.vla_target.goal_pos.y());
+    float gx = cursor.x + static_cast<float>(g_px.x()) * scale_x;
+    float gy = cursor.y +
+               static_cast<float>(s.map.height - 1 - g_px.y()) * scale_y;
+
+    draw_list->AddLine(ImVec2(gx, gy), ImVec2(tx, ty),
+                       IM_COL32(0, 255, 220, 200), 2.0f);
+
+    draw_list->AddCircleFilled(ImVec2(tx, ty), 7.0f,
+                               IM_COL32(0, 255, 200, 255));
+    draw_list->AddCircle(ImVec2(tx, ty), 10.0f, IM_COL32(255, 255, 255, 255),
+                         0, 1.5f);
+    draw_list->AddText(ImVec2(tx + 12.0f, ty - 8.0f),
+                       IM_COL32(0, 255, 220, 255),
+                       s.vla_target.detected_class.empty()
+                           ? s.vla_target.prompt.c_str()
+                           : s.vla_target.detected_class.c_str());
+
+    draw_list->AddCircleFilled(ImVec2(gx, gy), 5.0f,
+                               IM_COL32(255, 200, 0, 255));
+    float arrow_len = 16.0f;
+    float end_x =
+        gx + cosf(static_cast<float>(s.vla_target.goal_yaw)) * arrow_len;
+    float end_y =
+        gy - sinf(static_cast<float>(s.vla_target.goal_yaw)) * arrow_len;
+    draw_list->AddLine(ImVec2(gx, gy), ImVec2(end_x, end_y),
+                       IM_COL32(255, 255, 0, 255), 2.5f);
+    draw_list->AddText(ImVec2(gx + 8.0f, gy + 4.0f),
+                       IM_COL32(255, 220, 50, 255), "[VLA Dock]");
   }
 
   if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) {

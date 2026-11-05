@@ -68,3 +68,24 @@ TEST(RunComparatorTest, LoadDirectRosbagFolder) {
       "/home/pritam/fleet_commander/bags");
   EXPECT_GE(discovered.size(), 2UL);
 }
+
+TEST(VlaTargetStateTest, FreshnessAndGeometry) {
+  VlaTargetState vla;
+  EXPECT_FALSE(vla.is_fresh());
+  EXPECT_FALSE(vla.active);
+
+  vla.active = true;
+  vla.last_update = std::chrono::steady_clock::now();
+  EXPECT_TRUE(vla.is_fresh());
+
+  vla.prompt = "yellow shelf";
+  vla.detected_class = "yellow shelf";
+  vla.confidence = 0.88f;
+  vla.target_pos = Eigen::Vector2d(2.5, -1.0);
+  vla.goal_pos = Eigen::Vector2d(1.7, -1.0);
+  vla.goal_yaw = 0.0;
+
+  EXPECT_EQ(vla.prompt, "yellow shelf");
+  EXPECT_FLOAT_EQ(vla.confidence, 0.88f);
+  EXPECT_DOUBLE_EQ(vla.goal_pos.x(), 1.7);
+}
