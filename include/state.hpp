@@ -25,6 +25,14 @@ struct MapData {
     return {px, py};
   }
 
+  Eigen::Vector2d world_to_pixel_continuous(double wx, double wy) const {
+    if (resolution <= 0.0 || width == 0 || height == 0)
+      return {-1.0, -1.0};
+    double px = (wx - origin.x()) / resolution;
+    double py = (wy - origin.y()) / resolution;
+    return {px, py};
+  }
+
   Eigen::Vector2d pixel_to_world(int px, int py) const {
     double wx = px * resolution + origin.x();
     double wy = py * resolution + origin.y();
@@ -45,6 +53,7 @@ enum class RobotStatus { Idle, Navigating, Offline };
 struct RobotState {
   std::string id;
   RobotPose pose;
+  bool pose_initialized = false;
   RobotStatus status = RobotStatus::Idle;
   std::string current_goal_id;
   std::chrono::steady_clock::time_point last_tf_update =

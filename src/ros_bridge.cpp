@@ -6,7 +6,10 @@
 #include <rclcpp/logging.hpp>
 #include <rclcpp_action/client.hpp>
 
-RosBridge::RosBridge() : Node("fleet_commander") {
+RosBridge::RosBridge()
+    : Node("fleet_commander",
+           rclcpp::NodeOptions().parameter_overrides(
+               {rclcpp::Parameter("use_sim_time", true)})) {
   auto map_qos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
   map_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
       "/map", map_qos,
@@ -39,14 +42,27 @@ RosBridge::RosBridge() : Node("fleet_commander") {
             auto t = tf_buffer_->lookupTransform("map", ns + "/base_footprint",
                                                  tf2::TimePointZero);
 
-            robot.pose.x = t.transform.translation.x;
-            robot.pose.y = t.transform.translation.y;
+            double raw_x = t.transform.translation.x;
+            double raw_y = t.transform.translation.y;
 
             tf2::Quaternion q(t.transform.rotation.x, t.transform.rotation.y,
                               t.transform.rotation.z, t.transform.rotation.w);
-            double roll, pitch, yaw;
-            tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
-            robot.pose.yaw = yaw;
+            double roll, pitch, raw_yaw;
+            tf2::Matrix3x3(q).getRPY(roll, pitch, raw_yaw);
+
+            if (!robot.pose_initialized) {
+              robot.pose.x = raw_x;
+              robot.pose.y = raw_y;
+              robot.pose.yaw = raw_yaw;
+              robot.pose_initialized = true;
+            } else {
+              const double alpha = 0.35;
+              robot.pose.x += alpha * (raw_x - robot.pose.x);
+              robot.pose.y += alpha * (raw_y - robot.pose.y);
+              double dyaw = std::atan2(std::sin(raw_yaw - robot.pose.yaw),
+                                       std::cos(raw_yaw - robot.pose.yaw));
+              robot.pose.yaw += alpha * dyaw;
+            }
 
             robot.last_tf_update = std::chrono::steady_clock::now();
             robot.last_tf_update_sec = this->now().seconds();
@@ -185,29 +201,6 @@ void RosBridge::update_robot_pose(const std::string &ns) {
 
   auto &robot = state.robots[ns];
   robot.id = ns;
-
-  bool has_map_odom = odom_offsets_.count(ns) && odom_offsets_[ns].valid;
-  bool has_odom_base =
-      odom_base_transforms_.count(ns) && odom_base_transforms_[ns].valid;
-
-  if (has_map_odom && has_odom_base) {
-
-    const auto &mo = odom_offsets_[ns];
-    const auto &ob = odom_base_transforms_[ns];
-
-    double cos_yaw = std::cos(mo.yaw);
-    double sin_yaw = std::sin(mo.yaw);
-
-    double map_x = mo.x + ob.x * cos_yaw - ob.y * sin_yaw;
-    double map_y = mo.y + ob.x * sin_yaw + ob.y * cos_yaw;
-    double map_yaw = mo.yaw + ob.yaw;
-
-    robot.pose = RobotPose{map_x, map_y, map_yaw};
-  } else if (has_odom_base) {
-    const auto &ob = odom_base_transforms_[ns];
-    robot.pose = RobotPose{ob.x, ob.y, ob.yaw};
-  }
-
   robot.last_tf_update = std::chrono::steady_clock::now();
 
   if (robot.status == RobotStatus::Offline) {

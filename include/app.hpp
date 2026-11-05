@@ -7,8 +7,15 @@
 #include <thread>
 
 #include "ros_bridge.hpp"
+#include "comparison_types.hpp"
+#include "run_comparator.hpp"
 
 struct GLFWwindow;
+
+enum class ActivePage {
+  LiveFleet,
+  RunComparison
+};
 
 struct GoalDispatch {
   std::string robot_id;
@@ -42,9 +49,42 @@ private:
 
   float panel_width_ = 300.0f;
 
+  // View Mode / Page State
+  ActivePage active_page_{ActivePage::LiveFleet};
+
+  // Run Comparison & Benchmark State
+  char run_a_input_[256]{"/home/pritam/fleet_commander/bags/run_astar"};
+  char run_b_input_[256]{"/home/pritam/fleet_commander/bags/run_hybrid_astar"};
+  char bags_dir_input_[256]{"/home/pritam/fleet_commander/bags"};
+  std::vector<std::string> discovered_runs_;
+  int selected_combo_run_a_{-1};
+  int selected_combo_run_b_{-1};
+  bool show_run_a_path_{true};
+  bool show_run_b_path_{true};
+  bool show_planned_paths_{true};
+  int selected_mission_filter_{-1}; // -1 = All missions
+  float comparison_zoom_{1.0f};
+  float comp_pan_x_{0.0f};
+  float comp_pan_y_{0.0f};
+  std::string comparison_status_msg_{"Select two ROS 2 bags or session logs and click 'Run Benchmark Comparison'."};
+  std::optional<fleet_commander::ComparisonReport> comparison_report_;
+  std::thread comparison_thread_;
+  std::atomic<bool> is_comparing_{false};
+  bool use_cached_json_{true};
+
+  void scan_runs_directory();
+  void unselect_runs();
+
   void process_ros_events();
   void try_assign_goals();
   void render_ui();
+  void render_navbar();
+  void render_live_fleet_page();
+  void render_comparison_page();
+  void render_comparison_map_canvas();
+  void render_comparison_dashboard();
+  void execute_run_comparison(bool force_reparse = false);
+
   void render_toolbar();
   void render_map_panel();
   void render_status_bar();
