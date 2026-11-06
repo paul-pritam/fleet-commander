@@ -45,7 +45,7 @@ RosBridge::RosBridge()
 
   tf_poll_timer_ =
       this->create_wall_timer(std::chrono::milliseconds(50), [this]() {
-        std::lock_guard<std::mutex> lock(state_mutex);
+        std::lock_guard<std::recursive_mutex> lock(state_mutex);
         for (auto &[ns, robot] : state.robots) {
           try {
             auto t = tf_buffer_->lookupTransform("map", ns + "/base_footprint",
@@ -107,7 +107,7 @@ RosBridge::RosBridge()
 }
 
 void RosBridge::try_subscribe_map() {
-  std::lock_guard<std::mutex> lock(state_mutex);
+  std::lock_guard<std::recursive_mutex> lock(state_mutex);
   if (!state.map.empty()) {
     map_retry_timer_->cancel();
     return;
@@ -136,7 +136,7 @@ void RosBridge::map_callback(
     m.pixels[i] =
         (cell == -1) ? 128 : static_cast<uint8_t>(255.0 * (1 - cell / 100.0));
   }
-  std::lock_guard<std::mutex> lock(state_mutex);
+  std::lock_guard<std::recursive_mutex> lock(state_mutex);
 
   state.map = std::move(m);
   map_updated = true;
@@ -146,7 +146,7 @@ void RosBridge::map_callback(
 
 void RosBridge::tf_callback(const tf2_msgs::msg::TFMessage::SharedPtr msg) {
 
-  std::lock_guard<std::mutex> lock(state_mutex);
+  std::lock_guard<std::recursive_mutex> lock(state_mutex);
 
   for (const auto &t : msg->transforms) {
     const auto &parent = t.header.frame_id;
@@ -182,7 +182,7 @@ void RosBridge::tf_callback_for_robot(
     const std::string &robot_ns,
     const tf2_msgs::msg::TFMessage::SharedPtr msg) {
 
-  std::lock_guard<std::mutex> lock(state_mutex);
+  std::lock_guard<std::recursive_mutex> lock(state_mutex);
 
   for (const auto &t : msg->transforms) {
 
@@ -219,7 +219,7 @@ void RosBridge::update_robot_pose(const std::string &ns) {
 
 void RosBridge::discover_robots() {
 
-  std::lock_guard<std::mutex> lock(state_mutex);
+  std::lock_guard<std::recursive_mutex> lock(state_mutex);
 
   for (const auto &[ns, robot] : state.robots) {
 
@@ -323,10 +323,15 @@ bool RosBridge::send_goal(const std::string &robot_id,
   auto client = it->second;
 
   if (!client->action_server_is_ready()) {
-    RCLCPP_WARN(get_logger(),
-                "Action server for %s is not ready , retrying.........",
+    RCLCPP_INFO(get_logger(),
+                "Action server for %s not immediately ready, waiting up to 1s...",
                 robot_id.c_str());
-    return false;
+    if (!client->wait_for_action_server(std::chrono::seconds(1))) {
+      RCLCPP_WARN(get_logger(),
+                  "Action server for %s is not ready, cannot send goal",
+                  robot_id.c_str());
+      return false;
+    }
   }
 
   auto goal = NavigateToPose::Goal();
@@ -347,7 +352,7 @@ bool RosBridge::send_goal(const std::string &robot_id,
           RCLCPP_ERROR(get_logger(),
                        "Goal %s rejected by %s! Rolling back to Pending.",
                        goal_id.c_str(), robot_id.c_str());
-          std::lock_guard<std::mutex> lock(state_mutex);
+          std::lock_guard<std::recursive_mutex> lock(state_mutex);
           for (auto &g : state.goals) {
             if (g.id == goal_id) {
               g.status = GoalStatus::Pending;
@@ -379,14 +384,14 @@ void RosBridge::publish_vla_prompt(const std::string &prompt) {
     std_msgs::msg::String msg;
     msg.data = prompt;
     vla_prompt_pub_->publish(msg);
-    std::lock_guard<std::mutex> lock(state_mutex);
+    std::lock_guard<std::recursive_mutex> lock(state_mutex);
     state.vla_target.prompt = prompt;
   }
 }
 
 void RosBridge::vla_pose_callback(
     const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
-  std::lock_guard<std::mutex> lock(state_mutex);
+  std::lock_guard<std::recursive_mutex> lock(state_mutex);
   state.vla_target.active = true;
   state.vla_target.goal_pos.x() = msg->pose.position.x;
   state.vla_target.goal_pos.y() = msg->pose.position.y;
@@ -399,19 +404,22 @@ void RosBridge::vla_pose_callback(
 
 void RosBridge::vla_status_callback(
     const std_msgs::msg::String::SharedPtr msg) {
-  std::lock_guard<std::mutex> lock(state_mutex);
+  std::lock_guard<std::recursive_mutex> lock(state_mutex);
   try {
     const std::string &s = msg->data;
     auto find_val = [&](const std::string &key) -> std::string {
-      size_t pos = s.find("\"" + key + "\":");
+      std::string pattern = "\"" + key + "\"";
+      size_t pos = s.find(pattern);
       if (pos == std::string::npos)
         return "";
-      pos += key.length() + 2;
-      while (pos < s.size() && (s[pos] == ' ' || s[pos] == '\"'))
+      pos += pattern.length();
+      while (pos < s.size() && (s[pos] == ' ' || s[pos] == ':' || s[pos] == '\t'))
+        pos++;
+      if (pos < s.size() && s[pos] == '\"')
         pos++;
       size_t end = pos;
       while (end < s.size() && s[end] != ',' && s[end] != '}' &&
-             s[end] != '\"')
+             s[end] != '\"' && s[end] != '\n')
         end++;
       return s.substr(pos, end - pos);
     };
@@ -433,7 +441,7 @@ void RosBridge::vla_status_callback(
 }
 
 bool RosBridge::dispatch_vla_goal() {
-  std::lock_guard<std::mutex> lock(state_mutex);
+  std::lock_guard<std::recursive_mutex> lock(state_mutex);
   if (!state.vla_target.is_fresh()) {
     RCLCPP_WARN(get_logger(), "No fresh VLA target to dispatch");
     return false;
@@ -442,8 +450,10 @@ bool RosBridge::dispatch_vla_goal() {
   if (!state.robots.count(robot_id)) {
     if (!state.robots.empty())
       robot_id = state.robots.begin()->first;
-    else
+    else {
+      RCLCPP_WARN(get_logger(), "No robot registered in state to dispatch VLA goal");
       return false;
+    }
   }
 
   std::string goal_id = generate_goal_id();
@@ -454,6 +464,10 @@ bool RosBridge::dispatch_vla_goal() {
   g.assigned_robot = robot_id;
   g.created_at = std::chrono::steady_clock::now();
   state.add_goal(g);
+
+  RCLCPP_INFO(get_logger(), "Dispatching VLA action to %s: Goal (%s) at (%.2f, %.2f, yaw=%.2f)",
+              robot_id.c_str(), goal_id.c_str(), state.vla_target.goal_pos.x(),
+              state.vla_target.goal_pos.y(), state.vla_target.goal_yaw);
 
   return send_goal(robot_id, goal_id, state.vla_target.goal_pos.x(),
                    state.vla_target.goal_pos.y(), state.vla_target.goal_yaw);

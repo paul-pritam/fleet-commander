@@ -33,7 +33,7 @@ struct OdomOffset {
 class RosBridge : public rclcpp::Node {
 public:
   RosBridge();
-  std::mutex state_mutex;
+  std::recursive_mutex state_mutex;
   FleetState state;
   bool map_updated = false;
 

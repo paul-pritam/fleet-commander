@@ -93,7 +93,7 @@ bool App::init(int height, int width, const char *title) {
 
   ros_->on_goal_result = [this](const std::string &goal_id,
                                 const std::string &robot_id, bool success) {
-    std::lock_guard<std::mutex> lock(ros_->state_mutex);
+    std::lock_guard<std::recursive_mutex> lock(ros_->state_mutex);
     for (auto &g : ros_->state.goals) {
       if (g.id == goal_id && g.status == GoalStatus::Active) {
         g.status = success ? GoalStatus::Succeeded : GoalStatus::Failed;
@@ -162,7 +162,7 @@ void App::run() {
 
 void App::process_ros_events() {
 
-  std::lock_guard<std::mutex> lock(ros_->state_mutex);
+  std::lock_guard<std::recursive_mutex> lock(ros_->state_mutex);
   if (ros_->map_updated) {
     update_map_texture();
     ros_->map_updated = false;
@@ -173,7 +173,7 @@ void App::try_assign_goals() {
 
   std::vector<GoalDispatch> dispatches;
   {
-    std::lock_guard<std::mutex> lock(ros_->state_mutex);
+    std::lock_guard<std::recursive_mutex> lock(ros_->state_mutex);
 
     auto &s = ros_->state;
 
@@ -233,7 +233,7 @@ void App::try_assign_goals() {
   for (const auto &d : dispatches) {
     bool sent = ros_->send_goal(d.robot_id, d.goal_id, d.x, d.y);
     if (!sent) {
-      std::lock_guard<std::mutex> lock(ros_->state_mutex);
+      std::lock_guard<std::recursive_mutex> lock(ros_->state_mutex);
       for (auto &g : ros_->state.goals) {
         if (g.id == d.goal_id) {
           g.status = GoalStatus::Pending;
@@ -405,7 +405,7 @@ void App::render_toolbar() {
 }
 
 void App::render_status_panel() {
-  std::lock_guard<std::mutex> lock(ros_->state_mutex);
+  std::lock_guard<std::recursive_mutex> lock(ros_->state_mutex);
   auto &s = ros_->state;
 
   if (ImGui::CollapsingHeader("Robots", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -530,6 +530,7 @@ void App::render_status_panel() {
     }
     if (ImGui::Button("Ground Visual Target", ImVec2(-1.0f, 26.0f))) {
       ros_->publish_vla_prompt(prompt_input);
+      status_msg_ = std::string("VLA query: ") + prompt_input;
     }
 
     ImGui::Spacing();
@@ -537,16 +538,19 @@ void App::render_status_panel() {
     if (ImGui::SmallButton("Yellow Shelf")) {
       strncpy(prompt_input, "yellow shelf", sizeof(prompt_input) - 1);
       ros_->publish_vla_prompt(prompt_input);
+      status_msg_ = "Preset sent: yellow shelf";
     }
     ImGui::SameLine();
     if (ImGui::SmallButton("Cardboard Box")) {
       strncpy(prompt_input, "cardboard box", sizeof(prompt_input) - 1);
       ros_->publish_vla_prompt(prompt_input);
+      status_msg_ = "Preset sent: cardboard box";
     }
     ImGui::SameLine();
     if (ImGui::SmallButton("Pallet")) {
       strncpy(prompt_input, "pallet", sizeof(prompt_input) - 1);
       ros_->publish_vla_prompt(prompt_input);
+      status_msg_ = "Preset sent: pallet";
     }
 
     ImGui::Spacing();
@@ -574,7 +578,8 @@ void App::render_status_panel() {
       ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
                             ImVec4(0.0f, 0.85f, 0.70f, 1.0f));
       if (ImGui::Button("Dispatch VLA Action", ImVec2(-1.0f, 30.0f))) {
-        ros_->dispatch_vla_goal();
+        bool ok = ros_->dispatch_vla_goal();
+        status_msg_ = ok ? "VLA Goal Dispatched to Nav2 Hybrid A*!" : "Dispatch failed (Action server or target not ready)";
       }
       ImGui::PopStyleColor(2);
     } else {
@@ -587,7 +592,7 @@ void App::render_status_panel() {
 
 void App::render_status_bar() {
 
-  std::lock_guard<std::mutex> lock(ros_->state_mutex);
+  std::lock_guard<std::recursive_mutex> lock(ros_->state_mutex);
   auto &s = ros_->state;
 
   int robot_count = s.robots.size();
@@ -612,7 +617,7 @@ void App::render_status_bar() {
 }
 
 void App::render_map_panel() {
-  std::lock_guard<std::mutex> lock(ros_->state_mutex);
+  std::lock_guard<std::recursive_mutex> lock(ros_->state_mutex);
 
   auto &s = ros_->state;
   if (s.map.empty()) {
@@ -877,7 +882,7 @@ void App::render_comparison_map_canvas() {
 
   bool has_live_map = false;
   {
-    std::lock_guard<std::mutex> lock(ros_->state_mutex);
+    std::lock_guard<std::recursive_mutex> lock(ros_->state_mutex);
     if (!ros_->state.map.empty()) {
       has_live_map = true;
       origin_x = ros_->state.map.origin.x();
