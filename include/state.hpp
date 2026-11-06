@@ -65,8 +65,9 @@ struct RobotState {
   }
 
   bool is_reachable() const {
+    // 30 seconds reachability grace period to tolerate simulation pauses and AMCL idle intervals
     return std::chrono::steady_clock::now() - last_tf_update <
-           std::chrono::seconds(5);
+           std::chrono::seconds(30);
   }
 };
 

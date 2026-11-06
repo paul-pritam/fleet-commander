@@ -243,8 +243,13 @@ void RosBridge::discover_robots() {
   for (const auto &[topic_name, types] : topics) {
     std::string ns;
 
-    if (topic_name.ends_with("/cmd_vel") && topic_name.size() > strlen("/cmd_vel")) {
-      ns = topic_name.substr(1, topic_name.size() - strlen("/cmd_vel") - 1);
+    if ((topic_name.ends_with("/cmd_vel") && topic_name.size() > strlen("/cmd_vel")) ||
+        (topic_name.ends_with("/scan") && topic_name.size() > strlen("/scan")) ||
+        (topic_name.ends_with("/wheel_odom") && topic_name.size() > strlen("/wheel_odom"))) {
+      size_t slash_pos = topic_name.rfind('/');
+      if (slash_pos > 1) {
+        ns = topic_name.substr(1, slash_pos - 1);
+      }
     } else if (topic_name.ends_with("/navigate_to_pose/_action/send_goal")) {
       std::string action_topic =
           topic_name.substr(0, topic_name.size() - strlen("/_action/send_goal"));
@@ -277,6 +282,14 @@ void RosBridge::discover_robots() {
                   "Discovered robot %s (action: %s, ready: %s)",
                   ns.c_str(), action_name.c_str(),
                   action_clients_[ns]->action_server_is_ready() ? "yes" : "no");
+    } else {
+      auto &r = state.robots[ns];
+      if (action_clients_[ns] && action_clients_[ns]->action_server_is_ready()) {
+        r.last_tf_update = std::chrono::steady_clock::now();
+        if (r.status == RobotStatus::Offline && r.pose_initialized) {
+          r.status = RobotStatus::Idle;
+        }
+      }
     }
   }
 }

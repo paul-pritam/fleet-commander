@@ -384,12 +384,24 @@ void App::render_toolbar() {
   ImGui::SetNextItemWidth(130.0f);
   ImGui::Combo("##cost", &selected_cost_fn_, cost_names, 2);
 
-  ImGui::SameLine(0.0f, 20.0f);
+  ImGui::SameLine(0.0f, 15.0f);
 
-  ImGui::Text("Mex Goals/Robot");
+  ImGui::Text("Max Goals/Robot");
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(60.0f);
+  ImGui::SetNextItemWidth(50.0f);
   ImGui::DragInt("##max", &max_goals_per_robot_, 0.1f, 1, 10);
+
+  ImGui::SameLine(0.0f, 20.0f);
+  if (ImGui::Button("Reset View")) {
+    map_zoom_ = 1.0f;
+    map_pan_x_ = 0.0f;
+    map_pan_y_ = 0.0f;
+  }
+  ImGui::SameLine();
+  ImGui::TextDisabled("Zoom: %.1fx", map_zoom_);
+  ImGui::SameLine(0.0f, 15.0f);
+  ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 0.85f),
+                     "[Left-Click: Set Goal] [Right-Drag: Pan] [Scroll: Zoom]");
 }
 
 void App::render_status_panel() {
@@ -609,62 +621,104 @@ void App::render_map_panel() {
   }
 
   ImVec2 avail = ImGui::GetContentRegionAvail();
+  ImVec2 win_pos = ImGui::GetCursorScreenPos();
+  ImVec2 win_max = ImVec2(win_pos.x + avail.x, win_pos.y + avail.y);
+
   float map_aspect = static_cast<float>(s.map.width) / s.map.height;
   float avail_aspect = avail.x / avail.y;
 
-  float display_w, display_h;
+  float base_w, base_h;
   if (map_aspect > avail_aspect) {
-    display_w = avail.x;
-    display_h = avail.x / map_aspect;
+    base_w = avail.x;
+    base_h = avail.x / map_aspect;
   } else {
-    display_w = avail.y * map_aspect;
-    display_h = avail.y;
+    base_w = avail.y * map_aspect;
+    base_h = avail.y;
   }
 
-  display_w *= map_zoom_;
-  display_h *= map_zoom_;
+  float display_w = base_w * map_zoom_;
+  float display_h = base_h * map_zoom_;
 
-  ImVec2 cursor = ImGui::GetCursorScreenPos();
-  ImGui::Image((ImTextureID)(intptr_t)map_texture_,
-               ImVec2(display_w, display_h), ImVec2(0.0f, 1.0f),
-               ImVec2(1.0f, 0.0f));
+  // Smooth Zoom Centered on Cursor
+  float scroll = ImGui::GetIO().MouseWheel;
+  if (scroll != 0.0f && ImGui::IsWindowHovered()) {
+    float old_zoom = map_zoom_;
+    float zoom_factor = (scroll > 0.0f) ? 1.15f : (1.0f / 1.15f);
+    map_zoom_ = std::clamp(map_zoom_ * zoom_factor, 0.2f, 8.0f);
+
+    ImVec2 mouse = ImGui::GetMousePos();
+    float rel_x = mouse.x - (win_pos.x + map_pan_x_);
+    float rel_y = mouse.y - (win_pos.y + map_pan_y_);
+    map_pan_x_ -= rel_x * (map_zoom_ / old_zoom - 1.0f);
+    map_pan_y_ -= rel_y * (map_zoom_ / old_zoom - 1.0f);
+  }
+
+  // Interactive Pan / Drag (Right Mouse Button or Middle Mouse Button)
+  if (ImGui::IsWindowHovered()) {
+    if (ImGui::IsMouseDragging(ImGuiMouseButton_Right) ||
+        ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
+      ImVec2 delta = ImGui::GetIO().MouseDelta;
+      map_pan_x_ += delta.x;
+      map_pan_y_ += delta.y;
+    }
+  }
+
+  ImVec2 map_pos = ImVec2(win_pos.x + map_pan_x_, win_pos.y + map_pan_y_);
+
+  auto *draw_list = ImGui::GetWindowDrawList();
+  draw_list->PushClipRect(win_pos, win_max, true);
+
+  // Render Map Texture
+  draw_list->AddImage((ImTextureID)(intptr_t)map_texture_,
+                      map_pos,
+                      ImVec2(map_pos.x + display_w, map_pos.y + display_h),
+                      ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
 
   float scale_x = display_w / s.map.width;
   float scale_y = display_h / s.map.height;
 
-  auto *draw_list = ImGui::GetWindowDrawList();
-
+  // Render Robots (with stale-tolerance so robots do not disappear)
   for (const auto &[id, robot] : s.robots) {
-    if (!robot.is_reachable())
+    if (!robot.is_reachable() && !robot.pose_initialized)
       continue;
 
     auto px = s.map.world_to_pixel_continuous(robot.pose.x, robot.pose.y);
-    float sx = cursor.x + static_cast<float>(px.x()) * scale_x;
-    float sy = cursor.y + static_cast<float>(s.map.height - 1 - px.y()) * scale_y;
+    float sx = map_pos.x + static_cast<float>(px.x()) * scale_x;
+    float sy = map_pos.y + static_cast<float>(s.map.height - 1 - px.y()) * scale_y;
 
-    ImVec4 col = robot.status == RobotStatus::Idle         ? ImVec4(0, 1, 0, 1)
-                 : robot.status == RobotStatus::Navigating ? ImVec4(1, 1, 0, 1)
-                                                           : ImVec4(1, 0, 0, 1);
+    bool reachable = robot.is_reachable();
+    ImVec4 col = !reachable
+                     ? ImVec4(0.5f, 0.5f, 0.5f, 0.8f)
+                     : robot.status == RobotStatus::Idle
+                           ? ImVec4(0, 1, 0, 1)
+                           : robot.status == RobotStatus::Navigating
+                                 ? ImVec4(1, 1, 0, 1)
+                                 : ImVec4(1, 0, 0, 1);
 
     ImU32 color = ImGui::ColorConvertFloat4ToU32(col);
 
-    draw_list->AddCircleFilled(ImVec2(sx, sy), 6.0f, color);
-    draw_list->AddCircle(ImVec2(sx, sy), 8.0f, IM_COL32(255, 255, 255, 255), 0,
+    draw_list->AddCircleFilled(ImVec2(sx, sy), 7.0f, color);
+    draw_list->AddCircle(ImVec2(sx, sy), 9.0f, IM_COL32(255, 255, 255, 255), 0,
                          2.0f);
-    draw_list->AddText(ImVec2(sx + 10.0f, sy - 10.0f),
-                       IM_COL32(255, 255, 255, 255), id.c_str());
 
-    float arrow_len = 15.0f;
+    std::string robot_label = id + (reachable ? "" : " [stale]");
+    draw_list->AddText(ImVec2(sx + 12.0f, sy - 10.0f),
+                       reachable ? IM_COL32(255, 255, 255, 255)
+                                 : IM_COL32(200, 200, 200, 180),
+                       robot_label.c_str());
+
+    float arrow_len = 16.0f;
     float end_x = sx + cosf(robot.pose.yaw) * arrow_len;
     float end_y = sy - sinf(robot.pose.yaw) * arrow_len;
     draw_list->AddLine(ImVec2(sx, sy), ImVec2(end_x, end_y),
                        IM_COL32(255, 255, 255, 255), 2.0f);
   }
 
+  // Render Goals
   for (const auto &g : s.goals) {
     auto px = s.map.world_to_pixel_continuous(g.target.x(), g.target.y());
-    float sx = cursor.x + static_cast<float>(px.x()) * scale_x;
-    float sy = cursor.y + static_cast<float>(s.map.height - 1 - px.y()) * scale_y;
+    float sx = map_pos.x + static_cast<float>(px.x()) * scale_x;
+    float sy = map_pos.y + static_cast<float>(s.map.height - 1 - px.y()) * scale_y;
 
     ImVec4 col = g.status == GoalStatus::Pending     ? ImVec4(1, 0.65f, 0, 1)
                  : g.status == GoalStatus::Active    ? ImVec4(1, 1, 0, 1)
@@ -688,17 +742,18 @@ void App::render_map_panel() {
                        label);
   }
 
+  // Render Grounded VLA Target Overlay
   if (s.vla_target.is_fresh()) {
     auto t_px = s.map.world_to_pixel_continuous(s.vla_target.target_pos.x(),
                                                 s.vla_target.target_pos.y());
-    float tx = cursor.x + static_cast<float>(t_px.x()) * scale_x;
-    float ty = cursor.y +
+    float tx = map_pos.x + static_cast<float>(t_px.x()) * scale_x;
+    float ty = map_pos.y +
                static_cast<float>(s.map.height - 1 - t_px.y()) * scale_y;
 
     auto g_px = s.map.world_to_pixel_continuous(s.vla_target.goal_pos.x(),
                                                 s.vla_target.goal_pos.y());
-    float gx = cursor.x + static_cast<float>(g_px.x()) * scale_x;
-    float gy = cursor.y +
+    float gx = map_pos.x + static_cast<float>(g_px.x()) * scale_x;
+    float gy = map_pos.y +
                static_cast<float>(s.map.height - 1 - g_px.y()) * scale_y;
 
     draw_list->AddLine(ImVec2(gx, gy), ImVec2(tx, ty),
@@ -727,36 +782,54 @@ void App::render_map_panel() {
                        IM_COL32(255, 220, 50, 255), "[VLA Dock]");
   }
 
-  if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) {
-    ImVec2 mouse = ImGui::GetMousePos();
-    float local_x = (mouse.x - cursor.x) / display_w;
-    float local_y = (mouse.y - cursor.y) / display_h;
+  // Live Mouse Hover Coordinates & Crosshair Tooltip
+  ImVec2 mouse = ImGui::GetMousePos();
+  float local_x = (mouse.x - map_pos.x) / display_w;
+  float local_y = (mouse.y - map_pos.y) / display_h;
+  bool inside_map = (local_x >= 0.0f && local_x <= 1.0f &&
+                     local_y >= 0.0f && local_y <= 1.0f);
 
-    if (local_x >= 0.0f && local_x <= 1.0f && local_y >= 0.0f &&
-        local_y <= 1.0f) {
-      int pixel_x = static_cast<int>(local_x * s.map.width);
-      int pixel_y = static_cast<int>((1.0f - local_y) * s.map.height);
+  if (ImGui::IsWindowHovered() && inside_map) {
+    int pixel_x = static_cast<int>(local_x * s.map.width);
+    int pixel_y = static_cast<int>((1.0f - local_y) * s.map.height);
+    auto world = s.map.pixel_to_world(pixel_x, pixel_y);
 
-      auto world = s.map.pixel_to_world(pixel_x, pixel_y);
+    // Crosshair lines centered on cursor
+    draw_list->AddLine(ImVec2(mouse.x - 10.0f, mouse.y),
+                       ImVec2(mouse.x + 10.0f, mouse.y),
+                       IM_COL32(0, 255, 255, 200), 1.5f);
+    draw_list->AddLine(ImVec2(mouse.x, mouse.y - 10.0f),
+                       ImVec2(mouse.x, mouse.y + 10.0f),
+                       IM_COL32(0, 255, 255, 200), 1.5f);
 
-      GoalState goal;
-      goal.id = generate_goal_id();
-      goal.target = world;
-      goal.status = GoalStatus::Pending;
-      goal.created_at = std::chrono::steady_clock::now();
-      s.add_goal(std::move(goal));
-
-      status_msg_ = "Goal Created";
-    }
+    ImGui::SetTooltip("Warehouse Coordinate:\n  X: %.2f m\n  Y: %.2f m\n\n[Left-Click] Dispatch Nav Goal\n[Right-Drag] Pan Canvas\n[Scroll] Zoom Canvas",
+                      world.x(), world.y());
   }
 
-  float scroll = ImGui::GetIO().MouseWheel;
-  if (scroll != 0.0) {
-    if (ImGui::IsItemHovered()) {
-      map_zoom_ *= (scroll > 0) ? 1.1f : 0.9f;
-      map_zoom_ = std::clamp(map_zoom_, 0.1f, 5.0f);
-    }
+  // Left-Click to Dispatch Goal (ignoring click if dragging)
+  if (ImGui::IsWindowHovered() && inside_map &&
+      ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+      !ImGui::IsMouseDragging(ImGuiMouseButton_Left, 4.0f)) {
+    int pixel_x = static_cast<int>(local_x * s.map.width);
+    int pixel_y = static_cast<int>((1.0f - local_y) * s.map.height);
+    auto world = s.map.pixel_to_world(pixel_x, pixel_y);
+
+    GoalState goal;
+    goal.id = generate_goal_id();
+    goal.target = world;
+    goal.status = GoalStatus::Pending;
+    goal.created_at = std::chrono::steady_clock::now();
+    s.add_goal(std::move(goal));
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Goal Created at (%.2f, %.2f)", world.x(), world.y());
+    status_msg_ = buf;
   }
+
+  draw_list->PopClipRect();
+
+  // Reserve the space for the child window scroll area
+  ImGui::Dummy(avail);
 }
 
 void App::render_comparison_page() {

@@ -45,6 +45,8 @@ private:
   int selected_cost_fn_ = 0;
   int max_goals_per_robot_ = 1;
   float map_zoom_ = 1.0f;
+  float map_pan_x_ = 0.0f;
+  float map_pan_y_ = 0.0f;
   std::string status_msg_;
 
   float panel_width_ = 300.0f;
