@@ -12,6 +12,7 @@
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <tf2_msgs/msg/tf_message.hpp>
 #include <tf2_ros/buffer.hpp>
@@ -52,6 +53,10 @@ private:
   void tf_callback(const tf2_msgs::msg::TFMessage::SharedPtr msg);
   void vla_pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
   void vla_status_callback(const std_msgs::msg::String::SharedPtr msg);
+  void raw_camera_callback(const sensor_msgs::msg::Image::SharedPtr msg);
+  void detection_image_callback(const sensor_msgs::msg::Image::SharedPtr msg);
+  void copy_image_to_feed(const sensor_msgs::msg::Image::SharedPtr &msg,
+                          CameraFeedState &feed);
 
   void tf_callback_for_robot(const std::string &robot_ns,
                              const tf2_msgs::msg::TFMessage::SharedPtr msg);
@@ -83,4 +88,8 @@ private:
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr vla_prompt_pub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr vla_pose_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr vla_status_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr camera_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr detection_img_sub_;
+  std::chrono::steady_clock::time_point last_detection_img_time_ =
+      std::chrono::steady_clock::time_point::min();
 };

@@ -152,11 +152,29 @@ struct VlaTargetState {
   }
 };
 
+struct CameraFeedState {
+  int width = 0;
+  int height = 0;
+  std::string encoding = "rgb8";
+  std::vector<uint8_t> rgb_data;
+  std::chrono::steady_clock::time_point last_frame_time =
+      std::chrono::steady_clock::now();
+  bool has_new_frame = false;
+
+  bool is_active() const {
+    return !rgb_data.empty() &&
+           (std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - last_frame_time)
+                .count() < 4.0);
+  }
+};
+
 struct FleetState {
   std::map<std::string, RobotState> robots;
   std::vector<GoalState> goals;
   MapData map;
   VlaTargetState vla_target;
+  CameraFeedState camera_feed;
 
   void add_goal(GoalState goal) {
     goals.push_back(

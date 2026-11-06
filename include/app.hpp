@@ -41,6 +41,8 @@ private:
   GLFWwindow *window_ = nullptr;
   unsigned int map_texture_ = 0;
   int map_tex_w_ = 0, map_tex_h_ = 0;
+  unsigned int camera_texture_ = 0;
+  int camera_tex_w_ = 0, camera_tex_h_ = 0;
 
   int selected_cost_fn_ = 0;
   int max_goals_per_robot_ = 1;
@@ -92,4 +94,5 @@ private:
   void render_status_bar();
   void render_status_panel();
   void update_map_texture();
+  void update_camera_texture();
 };

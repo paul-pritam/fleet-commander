@@ -33,6 +33,14 @@ RosBridge::RosBridge()
       "/bcr_bot_1/vla_status", 10,
       std::bind(&RosBridge::vla_status_callback, this, std::placeholders::_1));
 
+  camera_sub_ = create_subscription<sensor_msgs::msg::Image>(
+      "/bcr_bot_1/kinect_camera/image", rclcpp::QoS(10),
+      std::bind(&RosBridge::raw_camera_callback, this, std::placeholders::_1));
+
+  detection_img_sub_ = create_subscription<sensor_msgs::msg::Image>(
+      "/bcr_bot_1/vla_detection_image", rclcpp::QoS(10),
+      std::bind(&RosBridge::detection_image_callback, this, std::placeholders::_1));
+
   if (!this->has_parameter("use_sim_time")) {
     this->declare_parameter("use_sim_time", true);
   } else {
@@ -471,5 +479,61 @@ bool RosBridge::dispatch_vla_goal() {
 
   return send_goal(robot_id, goal_id, state.vla_target.goal_pos.x(),
                    state.vla_target.goal_pos.y(), state.vla_target.goal_yaw);
+}
+
+void RosBridge::copy_image_to_feed(
+    const sensor_msgs::msg::Image::SharedPtr &msg, CameraFeedState &cam) {
+  cam.width = static_cast<int>(msg->width);
+  cam.height = static_cast<int>(msg->height);
+  cam.encoding = msg->encoding;
+
+  if (msg->encoding == "rgb8") {
+    cam.rgb_data.assign(msg->data.begin(), msg->data.end());
+  } else if (msg->encoding == "bgr8") {
+    cam.rgb_data.resize(msg->data.size());
+    for (size_t i = 0; i + 2 < msg->data.size(); i += 3) {
+      cam.rgb_data[i] = msg->data[i + 2];     // Red
+      cam.rgb_data[i + 1] = msg->data[i + 1]; // Green
+      cam.rgb_data[i + 2] = msg->data[i];     // Blue
+    }
+  } else if (msg->encoding == "rgba8") {
+    cam.rgb_data.resize((msg->data.size() / 4) * 3);
+    for (size_t i = 0, j = 0; i + 3 < msg->data.size(); i += 4, j += 3) {
+      cam.rgb_data[j] = msg->data[i];
+      cam.rgb_data[j + 1] = msg->data[i + 1];
+      cam.rgb_data[j + 2] = msg->data[i + 2];
+    }
+  } else if (msg->encoding == "bgra8") {
+    cam.rgb_data.resize((msg->data.size() / 4) * 3);
+    for (size_t i = 0, j = 0; i + 3 < msg->data.size(); i += 4, j += 3) {
+      cam.rgb_data[j] = msg->data[i + 2];
+      cam.rgb_data[j + 1] = msg->data[i + 1];
+      cam.rgb_data[j + 2] = msg->data[i];
+    }
+  } else {
+    cam.rgb_data.assign(msg->data.begin(), msg->data.end());
+  }
+
+  cam.last_frame_time = std::chrono::steady_clock::now();
+  cam.has_new_frame = true;
+}
+
+void RosBridge::detection_image_callback(
+    const sensor_msgs::msg::Image::SharedPtr msg) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex);
+  copy_image_to_feed(msg, state.camera_feed);
+  last_detection_img_time_ = std::chrono::steady_clock::now();
+}
+
+void RosBridge::raw_camera_callback(
+    const sensor_msgs::msg::Image::SharedPtr msg) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex);
+  auto elapsed = std::chrono::duration<double>(
+                     std::chrono::steady_clock::now() - last_detection_img_time_)
+                     .count();
+  if (elapsed < 2.0) {
+    return;
+  }
+  copy_image_to_feed(msg, state.camera_feed);
 }
 

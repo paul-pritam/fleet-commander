@@ -25,6 +25,7 @@ find_package(nav2_msgs REQUIRED)
 find_package(action_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_library(UUID_LIBRARY uuid REQUIRED)
 
 include (FetchContent)
@@ -105,6 +106,7 @@ ament_target_dependencies(fleet_commander
   action_msgs
   geometry_msgs
   std_msgs
+  sensor_msgs
 )
 
 target_include_directories(fleet_commander PRIVATE

@@ -89,3 +89,21 @@ TEST(VlaTargetStateTest, FreshnessAndGeometry) {
   EXPECT_FLOAT_EQ(vla.confidence, 0.88f);
   EXPECT_DOUBLE_EQ(vla.goal_pos.x(), 1.7);
 }
+
+TEST(CameraFeedStateTest, InitialStateAndFreshness) {
+  CameraFeedState cam;
+  EXPECT_EQ(cam.width, 0);
+  EXPECT_EQ(cam.height, 0);
+  EXPECT_TRUE(cam.rgb_data.empty());
+  EXPECT_FALSE(cam.is_active());
+
+  cam.width = 640;
+  cam.height = 480;
+  cam.rgb_data.resize(640 * 480 * 3, 200);
+  cam.last_frame_time = std::chrono::steady_clock::now();
+  EXPECT_TRUE(cam.is_active());
+
+  // Test expiration past 4 seconds
+  cam.last_frame_time = std::chrono::steady_clock::now() - std::chrono::seconds(5);
+  EXPECT_FALSE(cam.is_active());
+}

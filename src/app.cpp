@@ -45,6 +45,11 @@ void App::shutdown() {
     glDeleteTextures(1, &map_texture_);
     map_texture_ = 0;
   }
+
+  if (camera_texture_) {
+    glDeleteTextures(1, &camera_texture_);
+    camera_texture_ = 0;
+  }
 }
 
 bool App::init(int height, int width, const char *title) {
@@ -120,6 +125,16 @@ bool App::init(int height, int width, const char *title) {
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                placeholder);
 
+  unsigned char cam_placeholder[4] = {30, 30, 35, 255};
+  glGenTextures(1, &camera_texture_);
+  glBindTexture(GL_TEXTURE_2D, camera_texture_);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               cam_placeholder);
+
   running_ = true;
 
   ros_spin_thread_ = std::thread([this]() {
@@ -166,6 +181,10 @@ void App::process_ros_events() {
   if (ros_->map_updated) {
     update_map_texture();
     ros_->map_updated = false;
+  }
+  if (ros_->state.camera_feed.has_new_frame) {
+    update_camera_texture();
+    ros_->state.camera_feed.has_new_frame = false;
   }
 }
 
@@ -270,6 +289,20 @@ void App::update_map_texture() {
 
   map_tex_h_ = map.height;
   map_tex_w_ = map.width;
+}
+
+void App::update_camera_texture() {
+  const auto &cam = ros_->state.camera_feed;
+  if (cam.rgb_data.empty() || cam.width <= 0 || cam.height <= 0)
+    return;
+
+  glBindTexture(GL_TEXTURE_2D, camera_texture_);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, cam.width, cam.height, 0, GL_RGB,
+               GL_UNSIGNED_BYTE, cam.rgb_data.data());
+
+  camera_tex_w_ = cam.width;
+  camera_tex_h_ = cam.height;
 }
 
 void App::render_ui() {
@@ -586,6 +619,29 @@ void App::render_status_panel() {
       ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
                          "[?] Awaiting visual detection...");
       ImGui::TextDisabled("Camera observing warehouse aisle.");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::TextDisabled("Live Color Camera Feed:");
+    if (camera_texture_ != 0 && s.camera_feed.is_active()) {
+      float panel_w = ImGui::GetContentRegionAvail().x;
+      float aspect = (camera_tex_w_ > 0 && camera_tex_h_ > 0)
+                         ? (static_cast<float>(camera_tex_h_) /
+                            static_cast<float>(camera_tex_w_))
+                         : 0.75f;
+      float img_w = panel_w;
+      float img_h = img_w * aspect;
+      ImGui::Image(
+          (ImTextureID)(intptr_t)camera_texture_,
+          ImVec2(img_w, img_h));
+      ImGui::TextDisabled("%dx%d RGB | Live Stream", camera_tex_w_,
+                          camera_tex_h_);
+    } else {
+      ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f),
+                         "Awaiting camera stream...");
     }
   }
 }
