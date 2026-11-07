@@ -4,6 +4,22 @@ A C++20 multi-robot fleet management application and visual console for autonomo
 
 Fleet Commander provides real-time occupancy grid visualization, dynamic multi-robot pose tracking across ROS namespaces, asynchronous Nav2 action dispatching, and cost-based task scheduling. The user interface is rendered using Dear ImGui and hardware-accelerated OpenGL 4.6.
 
+---
+
+## Visual Console Overview
+
+### 1. Live Fleet Operations
+Interactive warehouse costmap rasterization with nearest-neighbor cell fidelity, dynamic multi-robot pose tracking across namespaces, real-time heading feedback, and asynchronous Nav2 goal dispatching.
+
+![Live Fleet Operations](docs/images/live_fleet_operations.png)
+
+### 2. Kinodynamic Run Comparison & Head-to-Head Benchmarking
+Direct rosbag session ingestion, dual trajectory overlay (2D Grid A* vs Kinodynamic Hybrid A*), curvature analysis, and quantitative performance metrics highlighting duration reduction and avoided replans.
+
+![Run Comparison & Benchmark Dashboard](docs/images/benchmark_comparison_dashboard.png)
+
+---
+
 ## Why This Project Exists
 
 RViz2 is an essential developer tool for inspecting TF trees and sensor topics, but it is resource-intensive and awkward to deploy as an operator console on a warehouse tablet or shop-floor terminal.
@@ -135,6 +151,8 @@ ros2 run fleet_commander fleet_commander
 fleet_commander/
 ├── CMakeLists.txt              # CMake configuration and FetchContent declarations
 ├── package.xml                 # ROS 2 package manifest and dependencies
+├── docs/
+│   └── images/                 # Operational UI and benchmark telemetry screenshots
 ├── include/
 │   ├── app.hpp                 # GLFW window, OpenGL context, and Dear ImGui layout
 │   ├── ros_bridge.hpp          # ROS 2 node, topic subscriptions, and Nav2 action clients
