@@ -6,9 +6,10 @@ source /opt/ros/jazzy/setup.bash
 source $HOME/bcr_ws/install/setup.bash
 source $HOME/fleet_commander/install/setup.bash
 
-# Ensure FastDDS / standard DDS when zenoh router is offline
-unset RMW_IMPLEMENTATION
+# Ensure FastDDS middleware on localhost
 unset ZENOH_SESSION_CONFIG_URI
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export ROS_LOCALHOST_ONLY=1
 
 # Ensure X11/Wayland display and direct AMD GPU hardware acceleration
 export DISPLAY=${DISPLAY:-:0}
