@@ -4,6 +4,33 @@ A C++20 multi-robot fleet management application and visual console for autonomo
 
 Fleet Commander provides real-time occupancy grid visualization, dynamic multi-robot pose tracking across ROS namespaces, asynchronous Nav2 action dispatching, and cost-based task scheduling. The user interface is rendered using Dear ImGui and hardware-accelerated OpenGL 4.6.
 
+---
+
+## Visual Console Overview
+
+### 1. Embodied Vision-Language-Action (VLA) Grounding Console
+Zero-cost, feed-forward open-vocabulary semantic target grounding. Ingests natural language directives (e.g., *"yellow shelf"*, *"cardboard box"*, *"pallet dock"*), runs YOLO-World vision backbone on CUDA, projects 2D visual bounding boxes into 3D metric map poses, and renders a live 640x480 RGB camera stream with real-time detection bounding boxes and target docking waypoints.
+
+![Embodied VLA Grounding Console](docs/images/embodied_vla_grounding_console.png)
+
+### 2. Live Fleet Operations
+Interactive warehouse costmap rasterization with nearest-neighbor cell fidelity, dynamic multi-robot pose tracking across namespaces, real-time heading feedback, and asynchronous Nav2 goal dispatching.
+
+![Live Fleet Operations](docs/images/live_fleet_operations.png)
+
+### 3. Kinodynamic Run Comparison & Head-to-Head Benchmarking
+This feature allows you to compare between two navigation sessions as long as you have the supported files:
+- **ROS 2 Bag Directories** (standard folder format containing `metadata.yaml`)
+- **MCAP Files** (`.mcap`)
+- **SQLite3 Rosbag Files** (`.db3`)
+- **Session Telemetry JSON** (`.json`)
+
+It overlays both trajectories on the map and computes head-to-head metrics (execution time, path efficiency, trajectory curvature, and controller aborts/replans), helping you decide which planners, controllers, and parameter configurations to use.
+
+![Run Comparison & Benchmark Dashboard](docs/images/benchmark_comparison_dashboard.png)
+
+---
+
 ## Why This Project Exists
 
 RViz2 is an essential developer tool for inspecting TF trees and sensor topics, but it is resource-intensive and awkward to deploy as an operator console on a warehouse tablet or shop-floor terminal.
@@ -135,6 +162,8 @@ ros2 run fleet_commander fleet_commander
 fleet_commander/
 ├── CMakeLists.txt              # CMake configuration and FetchContent declarations
 ├── package.xml                 # ROS 2 package manifest and dependencies
+├── docs/
+│   └── images/                 # Operational UI and benchmark telemetry screenshots
 ├── include/
 │   ├── app.hpp                 # GLFW window, OpenGL context, and Dear ImGui layout
 │   ├── ros_bridge.hpp          # ROS 2 node, topic subscriptions, and Nav2 action clients
